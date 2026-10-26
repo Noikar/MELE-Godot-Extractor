@@ -1,0 +1,68 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Command-line exporter for Mass Effect Legendary Edition assets.
+    Reads packages through Legendary Explorer's own LegendaryExplorerCore.dll (not shipped
+    here: point LexDir at an extracted Legendary Explorer release) and writes glTF (.glb)
+    that Godot imports directly.
+
+      dotnet run -c Release -/- list   <package.pcc> [filter]
+      dotnet run -c Release -/- mesh   <package.pcc> <out.glb> <SkeletalMesh path> [more meshes...]
+      dotnet run -c Release -/- manifest characters.json|weapons.json|levels.json <game root> <out folder>
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>LexExport</RootNamespace>
+    <LexDir Condition=" '$(LexDir)' == '' ">$(USERPROFILE)\Downloads\Legendary Explorer</LexDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Compile against LEX's copy; at runtime Program.cs resolves it (and its dependencies)
+         from LexDir, so nothing from LEX is copied into this tool's output. -->
+    <Reference Include="LegendaryExplorerCore">
+      <HintPath>$(LexDir)\LegendaryExplorerCore.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Types from these appear in LegendaryExplorerCore's public signatures. -->
+    <Reference Include="Serilog">
+      <HintPath>$(LexDir)\Serilog.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <!-- Decodes and encodes the textures MaterialBaker bakes. -->
+    <Reference Include="SixLabors.ImageSharp">
+      <HintPath>$(LexDir)\SixLabors.ImageSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <PackageReference Include="SharpGLTF.Toolkit" Version="1.0.3" />
+  </ItemGroup>
+
+  <!--
+    The game ships this tool as its first-run extractor (build.ps1 publishes it self-contained
+    into Builds/Windows/Extractor). LegendaryExplorerCore is GPLv3, so this tool is GPLv3 too
+    (LICENSE), and its source goes along with the binaries. So does the Corresponding Source of
+    the LEX binaries we ship (lex_source.ps1 zips the release tag matching LexDir's DLLs into
+    source/), and THIRD-PARTY-NOTICES.txt carries every bundled component's license.
+  -->
+  <ItemGroup>
+    <!-- What LegendaryExplorerCore needs at runtime (managed closure plus the native texture
+         and compression helpers), out of the 140 MB LEX folder. -->
+    <LexRuntime Include="$(LexDir)\LegendaryExplorerCore.dll;$(LexDir)\Serilog.dll;$(LexDir)\SixLabors.ImageSharp.dll;$(LexDir)\BCnEncoder.dll;$(LexDir)\BCnEncoder.NET.ImageSharp.dll;$(LexDir)\CommunityToolkit.Diagnostics.dll;$(LexDir)\Microsoft.IO.RecyclableMemoryStream.dll;$(LexDir)\Microsoft.Toolkit.HighPerformance.dll;$(LexDir)\Newtonsoft.Json.dll;$(LexDir)\System.Drawing.Common.dll;$(LexDir)\System.IO.Hashing.dll;$(LexDir)\CompressionWrappers.dll;$(LexDir)\TexConverter.dll" />
+    <ExtractorSource Include="*.cs;*.ps1;*.md;LexExport.csproj;characters.json;weapons.json;levels.json;LICENSE;THIRD-PARTY-NOTICES.txt" />
+  </ItemGroup>
+
+  <Target Name="CopyExtractorExtras" AfterTargets="Publish">
+    <Copy SourceFiles="@(LexRuntime)" DestinationFolder="$(PublishDir)" />
+    <Copy SourceFiles="characters.json;weapons.json;levels.json;LICENSE;THIRD-PARTY-NOTICES.txt" DestinationFolder="$(PublishDir)" />
+    <Copy SourceFiles="@(ExtractorSource)" DestinationFolder="$(PublishDir)source" />
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\lex_source.ps1&quot; -LexDir &quot;$(LexDir)&quot; -OutDir &quot;$(PublishDir)source&quot;" />
+  </Target>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>LexDir</_Parameter1>
+      <_Parameter2>$(LexDir)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+</Project>

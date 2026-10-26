@@ -1,0 +1,22 @@
+{
+  "version": 13,
+  "levels": [
+    {
+      "id": "wards",
+      "label": "Citadel Wards",
+      "map": "Wards",
+      "note": "ME1 BIOA_STA60 sublevels. Geometry is in _LAY, _ART, and _PLC; blocking volumes are in the base _DSG. The single-letter _DSG variants (02a, 05A, ...) and 09casino hold the furnishings (market stalls, bar seating, clinic beds, casino tables); the named plot-state variants (01destiny, 03quarian, 11news, ...) are left out.",
+      "music": ["Wards"],
+      "markers": { "package": "ME1/BIOA_STA00.pcc", "tags": "start_sta60_*" },
+      "npcs": "*_amb_*,Keeper",
+      "packages": [
+        "ME1/BIOA_STA60_??_LAY.pcc",
+        "ME1/BIOA_STA60_??_ART.pcc",
+        "ME1/BIOA_STA60_??_PLC.pcc",
+        "ME1/BIOA_STA60_??_DSG.pcc",
+        "ME1/BIOA_STA60_???_DSG.pcc",
+        "ME1/BIOA_STA60_09casino_DSG.pcc"
+      ]
+    }
+  ]
+}

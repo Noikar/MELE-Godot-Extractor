@@ -1,0 +1,68 @@
+{
+  "version": 2,
+  "weapons": [
+    {
+      "id": "pistol_kessler",
+      "label": "Kessler pistol (Hahne-Kedar)",
+      "note": "LE1 Default_WPN_PST_Appr variant 4 (Manf_HK_Weap's GE_Weap_Appearance): PSTa with WPN_PSTa_Mat_5a. Its own fold clips from WPN_PST_Main.",
+      "package": "ME1/BIOC_Materials.pcc",
+      "out": "Pistol/kessler.glb",
+      "args": [
+        "BIOG_WPN_PST_R.PSTa.WPN_PSTa_MDL",
+        "--mat",
+        "BIOG_WPN_PST_R.PSTa.WPN_PSTa_Mat_5a",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Expand=Expand",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Collapse=Collapse",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Collapsed=Collapsed",
+        "--sounds",
+        "--vfx",
+        "BIOG_V_C_Weapons_Z.01_Generic.PST_Generic_VFX"
+      ]
+    },
+    {
+      "id": "pistol_edge",
+      "label": "Edge pistol (Elkoss Combine)",
+      "note": "LE1 Default_WPN_PST_Appr variant 3 (Manf_Elkoss_Weap): PSTa with WPN_PSTa_Mat_4a.",
+      "package": "ME1/BIOC_Materials.pcc",
+      "out": "Pistol/edge.glb",
+      "args": [
+        "BIOG_WPN_PST_R.PSTa.WPN_PSTa_MDL",
+        "--mat",
+        "BIOG_WPN_PST_R.PSTa.WPN_PSTa_Mat_4a",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Expand=Expand",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Collapse=Collapse",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Collapsed=Collapsed",
+        "--sounds",
+        "--vfx",
+        "BIOG_V_C_Weapons_Z.01_Generic.PST_Generic_VFX"
+      ]
+    },
+    {
+      "id": "pistol_striker",
+      "label": "Striker pistol (Elanus Risk Control)",
+      "note": "LE1 Default_WPN_PST_Appr variant 0 (Manf_Elanus_Weap): PSTa with WPN_PSTa_Mat_1a.",
+      "package": "ME1/BIOC_Materials.pcc",
+      "out": "Pistol/striker.glb",
+      "args": [
+        "BIOG_WPN_PST_R.PSTa.WPN_PSTa_MDL",
+        "--mat",
+        "BIOG_WPN_PST_R.PSTa.WPN_PSTa_Mat_1a",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Expand=Expand",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Collapse=Collapse",
+        "--anim",
+        "BIOG_WPN_A.WPN_PST_Main_WPN_Collapsed=Collapsed",
+        "--sounds",
+        "--vfx",
+        "BIOG_V_C_Weapons_Z.01_Generic.PST_Generic_VFX"
+      ]
+    }
+  ]
+}
