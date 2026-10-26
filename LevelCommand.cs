@@ -257,6 +257,9 @@ public partial class LevelBuilder
             GuessDiffuse = true,
             SurfaceShading = true,
             CarriedTextures = _carriedTextures,
+            // Follow imports into the shared packages: LE1's remastered effects (the steam
+            // jets' FXS_ME1_VentStream_METR_INST) parent to materials in BIOC_Materials.
+            SharedShaders = true,
         };
         NodeBuilder packageNode = _root.CreateNode(packageName);
         var trimesh = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Trimesh_{packageName}");
@@ -612,7 +615,13 @@ public partial class LevelBuilder
         if (collision.Count > 0)
             assetExtras["placeable_collision"] = collision;
 
-        var textures = new TextureCache(pcc, new List<string>()) { BakeShaders = true, MaxTextureSize = _maxTexture, UnlitSource = levelTextures };
+        var textures = new TextureCache(pcc, new List<string>())
+        {
+            BakeShaders = true,
+            MaxTextureSize = _maxTexture,
+            UnlitSource = levelTextures,
+            SharedShaders = true,
+        };
         _scene.AddSkinnedMesh(MeshCommand.BuildMesh(name, mesh, skeleton, textures), Matrix4x4.Identity, joints);
         Console.WriteLine($"  placeable model {name}: {skeleton.Bones.Count} bones, clips {string.Join(", ", clips)}; collision {collisionLog}.");
         return name;
