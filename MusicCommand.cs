@@ -19,7 +19,8 @@ namespace LexExport;
 //
 // Writes <out>/<musicid>.ogg (lowercase) per ID, as-is, and adds to <out>/music.json describing each
 // (file, loop, fade_in, fade_out, volume: the cue's VolumeMultiplier, and silence_min/silence_max:
-// the pause between plays, when the sound event has one; see Silence).
+// the pause between plays, when the sound event has one; see Silence). An ID whose default cue is
+// MUSIC_NONE gets an entry with only its fades and no file: its volumes silence the area music.
 public static class MusicCommand
 {
     public static int Run(string outDir, string[] musicIds)
@@ -77,7 +78,12 @@ public static class MusicCommand
         // "music.mus_wards_5": the cue, by name, in Music.pcc.
         string cueName = Cell("SoundCue");
         if (cueName is "" or "MUSIC_NONE")
-            throw new InvalidDataException("no default music (MUSIC_NONE)");
+        {
+            // A volume that silences the area music (Flux, Chora's Den: their clubs play their
+            // own as AmbientSounds). No file, but its fades still say how the music leaves.
+            Console.WriteLine($"{id}: no music (MUSIC_NONE), fades {Number("FadeInTime")}/{Number("FadeOutTime")} s");
+            return new JsonObject { ["fade_in"] = Number("FadeInTime"), ["fade_out"] = Number("FadeOutTime") };
+        }
         cueName = cueName[(cueName.LastIndexOf('.') + 1)..];
         ExportEntry cue = music.Exports.FirstOrDefault(e => e.ClassName == "SoundCue" && e.ObjectName.Instanced.Equals(cueName, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidDataException($"no SoundCue {cueName} in Music.pcc");

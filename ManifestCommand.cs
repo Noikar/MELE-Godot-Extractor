@@ -158,14 +158,16 @@ public static class ManifestCommand
         // Ambient NPCs, by Tag.
         if (entry.TryGetProperty("npcs", out JsonElement npcs))
             args.AddRange(["--npcs", npcs.GetString()]);
+        string[] musicIds = entry.TryGetProperty("music", out JsonElement music)
+            ? music.EnumerateArray().Select(m => m.GetString()).ToArray()
+            : [];
+        // The music volumes of those MusicIDs, from another package (the persistent level).
+        if (entry.TryGetProperty("music_volumes", out JsonElement musicVolumes) && musicIds.Length > 0)
+            args.AddRange(["--music-volumes", musicVolumes.GetString(), string.Join(",", musicIds)]);
         if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray()) != 0)
             throw new InvalidOperationException("level export returned an error");
 
-        if (entry.TryGetProperty("music", out JsonElement music))
-        {
-            string[] ids = music.EnumerateArray().Select(m => m.GetString()).ToArray();
-            if (ids.Length > 0 && MusicCommand.Run(outDir, ids) != 0)
-                throw new InvalidOperationException("music export returned an error");
-        }
+        if (musicIds.Length > 0 && MusicCommand.Run(outDir, musicIds) != 0)
+            throw new InvalidOperationException("music export returned an error");
     }
 }

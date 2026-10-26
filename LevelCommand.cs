@@ -60,13 +60,16 @@ public static class LevelCommand
     // "--max-texture <px>" (largest texture side to embed, default 1024; 0 = full size), and
     // "--markers <package> <tag pattern>" (start locations from another package, usually the
     // persistent level that holds a whole location's, e.g. ME1/BIOA_STA00.pcc start_sta60_*),
-    // "--sounds <dir>" (where placeables' sound effects go; default: the .glb's folder), and
-    // "--npcs <tag patterns>" (comma-separated BioPawn Tags to export as NPCs, e.g. *_amb_*,Keeper).
+    // "--sounds <dir>" (where placeables' and ambient sounds go; default: the .glb's folder),
+    // "--npcs <tag patterns>" (comma-separated BioPawn Tags to export as NPCs, e.g. *_amb_*,Keeper),
+    // and "--music-volumes <package> <MusicIDs>" (the BioMusicVolumes of another package, usually
+    // the persistent level, whose MusicID is one of the comma-separated IDs; see LevelAudio.cs).
     public static int Run(string outPath, string[] args)
     {
         LevelBuilder.DroppedSections.Clear();
         var patterns = new List<string>();
         var markerSources = new List<(string Package, string Tags)>();
+        var musicSources = new List<(string Package, string[] Ids)>();
         string npcs = null;
         int maxTexture = 1024;
         string soundsDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
@@ -78,6 +81,8 @@ public static class LevelCommand
                 soundsDir = args[++i];
             else if (args[i] == "--markers" && i + 2 < args.Length)
                 markerSources.Add((args[++i], args[++i]));
+            else if (args[i] == "--music-volumes" && i + 2 < args.Length)
+                musicSources.Add((args[++i], args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
             else if (args[i] == "--npcs" && i + 1 < args.Length)
                 npcs = args[++i];
             else
@@ -105,6 +110,11 @@ public static class LevelCommand
         {
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(package).First());
             builder.AddMarkers(pcc, tags);
+        }
+        foreach ((string package, string[] ids) in musicSources)
+        {
+            using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(package).First());
+            builder.AddMusicVolumes(pcc, ids);
         }
         builder.Write(outPath);
         MaterialBaker.ForgetDecoded();
@@ -340,6 +350,10 @@ public partial class LevelBuilder
         else if (cls.Contains("BlockingVolume"))
         {
             AddBlockingVolume(pcc, actor, props, actorToWorld);
+        }
+        else if (IsAmbientSound(actor, props))
+        {
+            AddAmbientSound(pcc, actor, props, actorToWorld);
         }
         else if (IsStartActor(cls))
         {
@@ -1580,6 +1594,7 @@ public partial class LevelBuilder
         Console.WriteLine($"Skeletal placeables: {_skeletalPlaceables} from {_skeletalAssets.Count} models, "
             + $"{_sounds.Values.Count(v => v != null)} of {_sounds.Count} sounds to {_soundsDir}.");
         Console.WriteLine($"Placeable effects: {_effects}.");
+        Console.WriteLine($"Ambient sounds: {_ambientSounds} ({_ambientMusic} music); music volumes: {_musicVolumeCount}.");
         if (_pawnsNode != null)
         {
             Console.WriteLine($"NPCs: {_pawns} from {_pawnAssets.Count} looks; {_pawnsAtStations} at action stations, "
