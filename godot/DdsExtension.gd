@@ -5,14 +5,13 @@ class_name DdsExtension
 # ---------------------------------------------------------------
 # DdsExtension — reads MSFT_texture_dds, which Godot's glTF importer skips.
 #
-# LexExport writes every texture as DDS (Tools/LexExport/DdsTextures.cs): ME1's own
-# block-compressed data and mips where it carries a texture unchanged, and our bakes encoded to
-# BC1, BC3, or BC5. Godot's runtime glTF loader would decode PNGs to uncompressed RGBA without
-# mipmaps instead (2.7 GB of video memory for the Wards). This points each texture at its DDS
-# image and decodes that with Image.load_dds_from_buffer, so it reaches the GPU as stored. The
-# editor's import unpacks the decoded images as PNGs and imports those as before. Registered
-# with SpecularExtension: by the Level Import plugin (editor imports) and by the runtime
-# loaders (CharacterAssets, LevelGeometry) before they parse a .glb.
+# LexExport writes every texture as DDS (DdsTextures.cs): the game's own block-compressed data
+# and mips where it carries a texture unchanged, and its bakes encoded to BC1, BC3, or BC5.
+# Godot's runtime glTF loader would decode PNGs to uncompressed RGBA without mipmaps instead (a
+# large level can take several GB of video memory that way). This points each texture at its
+# DDS image and decodes that with Image.load_dds_from_buffer, so it reaches the GPU as stored.
+# An editor import unpacks the decoded images as PNGs and imports those. Call ensure_registered()
+# once, before the first .glb is imported or parsed, in the editor and at runtime alike.
 # ---------------------------------------------------------------
 
 const EXTENSION: String = "MSFT_texture_dds"
