@@ -18,7 +18,8 @@ namespace LexExport;
 //   Content/Packages/ISACT/<bank>.isb          the sample itself, an Ogg Vorbis stream
 //
 // Writes <out>/<musicid>.ogg (lowercase) per ID, as-is, and adds to <out>/music.json describing each
-// (file, loop, fade_in, fade_out, volume: the cue's VolumeMultiplier).
+// (file, loop, fade_in, fade_out, volume: the cue's VolumeMultiplier, and silence_min/silence_max:
+// the pause between plays, when the sound event has one; see Silence).
 public static class MusicCommand
 {
     public static int Run(string outDir, string[] musicIds)
@@ -105,7 +106,9 @@ public static class MusicCommand
             && e.ObjectName.Instanced.Equals(bankName, StringComparison.OrdinalIgnoreCase))
             ?? throw new InvalidDataException($"no streaming data for bank {bankName}");
         ISACTBankPair pair = ObjectBinary.From<BioSoundNodeWaveStreamingData>(streaming).BankPair;
-        string sampleTitle = SampleTitle(pair, eventName);
+        BankChunk soundEvent = SoundEvent(pair, eventName);
+        string sampleTitle = SampleTitle(pair, soundEvent, eventName);
+        (float silenceMin, float silenceMax) = Silence(soundEvent);
 
         // The sample's data, from the bank file.
         string isbPath = Path.Combine(isactDir, bankName + ".isb");
@@ -130,8 +133,9 @@ public static class MusicCommand
         string file = id.ToLowerInvariant() + ".ogg";
         OutputFiles.WriteAllBytes(Path.Combine(outDir, file), data);
         Console.WriteLine($"{id}: {cueName} -> {bankName}:{eventName} -> {sampleTitle} ({sampleMs / 1000f:0.#} s, wave says {duration:0.#} s), "
-            + $"{data.Length / 1024} KB, loop {loop}, fades {Number("FadeInTime")}/{Number("FadeOutTime")} s, volume {volume}");
-        return new JsonObject
+            + $"{data.Length / 1024} KB, loop {loop}, fades {Number("FadeInTime")}/{Number("FadeOutTime")} s, volume {volume}, "
+            + $"silence {silenceMin:0.#}-{silenceMax:0.#} s");
+        var track = new JsonObject
         {
             ["file"] = file,
             ["loop"] = loop,
@@ -139,16 +143,39 @@ public static class MusicCommand
             ["fade_out"] = Number("FadeOutTime"),
             ["volume"] = volume,
         };
+        if (silenceMax > 0f)
+        {
+            track["silence_min"] = silenceMin;
+            track["silence_max"] = silenceMax;
+        }
+        return track;
+    }
+
+    // The sound event's chunk in the bank's index (the ICB half of the streaming data).
+    private static BankChunk SoundEvent(ISACTBankPair pair, string eventName) =>
+        pair.ICBBank?.GetAllBankChunks().FirstOrDefault(c => c.SubChunks != null
+            && c.SubChunks.OfType<TitleBankChunk>().Any(t => t.Value.Equals(eventName, StringComparison.OrdinalIgnoreCase))
+            && c.SubChunks.Any(s => s is SoundEventSoundTracksFour))
+        ?? throw new InvalidDataException($"no sound event {eventName} in the bank index");
+
+    // The pause, in seconds, ISACT plays between a looping event's plays: (0, 0) when it has none.
+    // LEX doesn't parse the event's 20-byte "silt" chunk; read across all of ME1's music events it
+    // is five ints: the silence's slot in the event's playlist (always track count + 1, so it comes
+    // after the tracks in USE_EVS_ORDER), its chance (100 / slots), the minimum and maximum length
+    // in ms, and an enabled flag. The samples carry no loop points, and their fades are baked in,
+    // so this pause is the whole of how ME1 loops its area music (the Wards: 102 s, then 15-30 s).
+    private static (float Min, float Max) Silence(BankChunk soundEvent)
+    {
+        byte[] raw = soundEvent.SubChunks.FirstOrDefault(c => c.ChunkName == "silt")?.RawData;
+        if (raw == null || raw.Length < 20 || BitConverter.ToInt32(raw, 16) == 0)
+            return (0f, 0f);
+        return (BitConverter.ToInt32(raw, 8) / 1000f, BitConverter.ToInt32(raw, 12) / 1000f);
     }
 
     // The sample a bank's sound event plays: its sound track's buffer index (low 16 bits) is a
     // sample's resource index in the bank's own index (the ISB half of the streaming data).
-    private static string SampleTitle(ISACTBankPair pair, string eventName)
+    private static string SampleTitle(ISACTBankPair pair, BankChunk soundEvent, string eventName)
     {
-        BankChunk soundEvent = pair.ICBBank?.GetAllBankChunks().FirstOrDefault(c => c.SubChunks != null
-            && c.SubChunks.OfType<TitleBankChunk>().Any(t => t.Value.Equals(eventName, StringComparison.OrdinalIgnoreCase))
-            && c.SubChunks.Any(s => s is SoundEventSoundTracksFour))
-            ?? throw new InvalidDataException($"no sound event {eventName} in the bank index");
         var tracks = soundEvent.SubChunks.OfType<SoundEventSoundTracksFour>().First().SoundTracks;
         if (tracks.Count == 0)
             throw new InvalidDataException($"sound event {eventName} has no tracks");
