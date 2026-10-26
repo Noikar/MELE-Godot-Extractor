@@ -15,9 +15,9 @@ public static class Program
     public static readonly string LexDir = ResolveLexDir();
 
     // The Legendary Edition install. The manifest command takes it as an argument (the game
-    // passes the player's install); the developer commands use ME_LE_ROOT or this default.
-    public static string GameRoot = Environment.GetEnvironmentVariable("ME_LE_ROOT")
-        ?? @"D:\SteamLibrary\steamapps\common\Mass Effect Legendary Edition";
+    // passes the player's install); the developer commands use ME_LE_ROOT, else the first
+    // install `locate` finds.
+    public static string GameRoot = Environment.GetEnvironmentVariable("ME_LE_ROOT");
 
     // How every .glb is written. SharpGLTF merges all meshes' vertices into one shared buffer
     // view by default, and Godot's glTF parser copies an accessor's whole buffer view each time
@@ -65,6 +65,13 @@ public static class Program
             GameRoot = args[2];
             // The game reads a single pipe; an unread stderr could fill up and stall us.
             Console.SetError(Console.Out);
+        }
+        if (string.IsNullOrEmpty(GameRoot))
+            GameRoot = LocateCommand.Installs().FirstOrDefault();
+        if (GameRoot == null)
+        {
+            Console.Error.WriteLine("No Legendary Edition install found; set ME_LE_ROOT to the folder holding Game\\ME1.");
+            return 2;
         }
 
         // Always one core free; --background (the game extracting while it's played) takes half.

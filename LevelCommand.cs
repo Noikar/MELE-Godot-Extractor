@@ -53,7 +53,7 @@ using COLLISION_VERTEX = VertexBuilder<VertexPosition, VertexEmpty, VertexEmpty>
 // hulls when the StaticMesh sets UseSimpleBoxCollision and has any, else its triangles.
 //
 // Each mesh instance also carries the original game's precomputed lighting, which the
-// loader can draw instead of lighting the level itself (LevelGeometry's ORIGINAL mode).
+// loader can draw instead of lighting the level itself (the game's original-lighting mode).
 public static class LevelCommand
 {
     // args: package paths (wildcards allowed in the file name, e.g. ME1/BIOA_STA60_??_LAY.pcc),

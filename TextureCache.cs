@@ -655,8 +655,8 @@ public class TextureCache
             notes.Add("some animation ignored");
         extras["parameters"] = parameters;
         // A masked material's opacity mask: the carried textures whose alpha its discards test,
-        // and UE3's clip value, so the Godot side can rebuild their mips to keep the cutout's
-        // coverage (LevelMaterial._cutout_texture).
+        // and UE3's clip value, so the game can rebuild their mips with that threshold to keep
+        // the cutout's coverage.
         string[] cutouts = used.Cutouts.Select(slot => $"texture_{slot}").Where(parameters.ContainsKey).ToArray();
         if (cutouts.Length > 0)
         {
@@ -669,7 +669,7 @@ public class TextureCache
             notes.Add($"cutout {string.Join(", ", cutouts)} at {clip:0.####}");
         }
         // A lit material's unlit translation is only for particles, even when its lightmap
-        // translations failed (LevelMaterial.is_lit).
+        // translations failed (the game tells them apart by this flag).
         if (policies.Any(p => p != ShaderTranslator.Policy.Unlit))
             extras["lit"] = true;
         // How the unlit translation blends: BLEND_Translucent (alpha) or BLEND_Additive.

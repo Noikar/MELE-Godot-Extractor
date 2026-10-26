@@ -14,7 +14,7 @@ namespace LexExport;
 // Writes a model's textures as DDS (glTF's MSFT_texture_dds), so the game uploads them as they
 // are: block-compressed, with mipmaps. Godot's runtime glTF loader decodes PNGs to uncompressed
 // RGBA without mipmaps (2.7 GB of video memory for the Wards); the game reads DDS through
-// Client/Assets/DdsExtension.gd instead. The editor's import unpacks them as PNGs, as before.
+// godot/DdsExtension.gd instead. The editor's import unpacks them as PNGs, as before.
 //
 // Every image is DDS from the moment it's made, with no PNG in between. Textures carried exactly
 // as ME1 stored them (Original) keep ME1's own data and mips. The rest, which we bake (material

@@ -128,7 +128,7 @@ public static class SoundExport
         return result;
     }
 
-    // LEX leaves ISACT's entities raw; read across ME1's (2026-10-26):
+    // LEX leaves ISACT's entities raw; read across ME1's:
     //   - The wave's event names an entity whose ecac chunk lists the parts it plays at once, each
     //     a 4-char tag and an int: "sdtl" (a timeline, by indx) or "sdqu" (a queue, by indx).
     //     Without ecac, a wave's event with a qcnt chunk is itself one queue.

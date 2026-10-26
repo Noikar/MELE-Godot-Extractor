@@ -6,7 +6,7 @@ namespace LexExport;
 
 // Reads Cascade particle systems for the level export: each emitter's highest-detail LOD
 // (Level 0), its modules, and their distributions, as the "me_particles" description that
-// Client/Maps/LevelParticles.gd builds GPUParticles3D nodes from.
+// the game's particle builder turns into GPUParticles3D nodes.
 //
 // Cooked levels keep only each distribution's lookup table (FRawDistribution), not the
 // distribution object:

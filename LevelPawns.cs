@@ -41,7 +41,7 @@ namespace LexExport;
 // across the species on the human skeleton.
 public partial class LevelBuilder
 {
-    // NPC textures are baked smaller than player characters' (the user's call, 2026-10-24):
+    // NPC textures are baked at 512 px, smaller than player characters':
     // they're seen from further away, and every look adds to first-run extraction.
     private const int PawnTextureSize = 512;
 

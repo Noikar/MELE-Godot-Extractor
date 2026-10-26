@@ -12,7 +12,7 @@ namespace LexExport;
 // products, texture samples, compares, discard).
 //
 // The result is the body of a Godot fragment(), with the registers as vec4 locals, plus the
-// uniforms it samples. Godot's side (Client/Maps/LevelMaterial.gd and .gdshaderinc) supplies
+// uniforms it samples. The game's material wrapper (script and shader include) supplies
 // what the game's vertex shader would have, under the fixed names Input() lists, in Unreal's
 // axes and units, and the dx_* helpers for the bitwise compare results.
 public static class ShaderTranslator
@@ -388,7 +388,7 @@ public static class ShaderTranslator
             string swizzle = t.Groups["swz"].Success ? Swizzle4(t.Groups["swz"].Value) : "xyzw";
             string kind = op.Split('(')[0];
             // The scene depth, encoded so the shader's own decode (with MinZ_MaxZRatio) yields
-            // the linear depth in centimeters; see scene_depth() in LevelMaterial.gdshaderinc.
+            // the linear depth in centimeters, as the game's scene_depth() helper returns it.
             if (resource.Name == "scene_depth_texture")
             {
                 _sceneDepth = true;
@@ -507,7 +507,7 @@ public static class ShaderTranslator
                 "WorldToLocalMatrix" => c < 3 && element < 3 ? $"world_to_local[{element}][{c}]" : "0.0",
                 "LocalToWorldMatrix" => c < 3 && element < 3 ? $"local_to_world[{element}][{c}]" : "0.0",
                 // The light environment's dominant light, and its harmonics: 9 coefficients
-                // per color in 7 registers (the Godot side packs them; LevelMaterial.gd).
+                // per color in 7 registers (the game packs them).
                 "LightColorAndFalloffExponent" when _policy == Policy.LightEnvironment => c < 3 ? $"light_color.{xyzw[c]}" : "0.0",
                 "WorldIncidentLighting" when _policy == Policy.LightEnvironment => $"world_incident_lighting[{element}].{xyzw[c]}",
                 // The same screen-position scale and bias PSOffsetConstants carries elsewhere.

@@ -11,12 +11,26 @@ public static class LocateCommand
 
     public static int Run()
     {
+        List<string> found = Installs();
+        foreach (string root in found)
+            Console.WriteLine($"FOUND {root}");
+        if (found.Count == 0)
+            Console.WriteLine("NONE");
+        return 0;
+    }
+
+    // Every valid install, best guess first.
+    public static List<string> Installs()
+    {
         var found = new List<string>();
         void Consider(string root)
         {
-            if (!string.IsNullOrEmpty(root) && IsInstall(root)
-                && !found.Contains(Path.GetFullPath(root), StringComparer.OrdinalIgnoreCase))
-                found.Add(Path.GetFullPath(root));
+            if (string.IsNullOrEmpty(root) || !IsInstall(root))
+                return;
+            // The registry's path ends in a separator and Steam's doesn't; one install, one line.
+            string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(root));
+            if (!found.Contains(full, StringComparer.OrdinalIgnoreCase))
+                found.Add(full);
         }
 
         foreach (string library in SteamLibraries())
@@ -26,11 +40,7 @@ public static class LocateCommand
         foreach (string key in new[] { @"SOFTWARE\BioWare\Mass Effect Legendary Edition", @"SOFTWARE\WOW6432Node\BioWare\Mass Effect Legendary Edition" })
             Consider(Registry.LocalMachine.OpenSubKey(key)?.GetValue("Install Dir") as string);
 
-        foreach (string root in found)
-            Console.WriteLine($"FOUND {root}");
-        if (found.Count == 0)
-            Console.WriteLine("NONE");
-        return 0;
+        return found;
     }
 
     // An install has the cooked packages of all three games where the manifest expects them.
@@ -48,7 +58,7 @@ public static class LocateCommand
         string vdf = Path.Combine(steam, "steamapps", "libraryfolders.vdf");
         if (!File.Exists(vdf))
             yield break;
-        // Each library is a "path" "D:\\SteamLibrary" pair; backslashes are escaped.
+        // Each library is a "path" "<drive>:\\<folder>" pair; backslashes are escaped.
         foreach (Match m in Regex.Matches(File.ReadAllText(vdf), "\"path\"\\s+\"([^\"]+)\""))
             yield return m.Groups[1].Value.Replace(@"\\", @"\");
     }

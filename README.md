@@ -47,8 +47,8 @@ dotnet run -c Release -p:LexDir="C:\path\to\Legendary Explorer" -- locate
 `LexDir` defaults to `%USERPROFILE%\Downloads\Legendary Explorer`. At runtime the tool loads
 LEX's DLLs from there, from next to its own executable (a published build), or from the
 `LEX_DIR` environment variable. The developer commands find the game through `ME_LE_ROOT`
-(the folder holding `Game\ME1`), and `locate` prints the installs it finds through Steam and the
-EA app.
+(the folder holding `Game\ME1`), or else take the first install `locate` finds; `locate` prints
+the installs it finds through Steam and the EA app.
 
 ### Publishing a self-contained build
 
