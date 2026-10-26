@@ -20,8 +20,10 @@ public static class ShaderTranslator
     // Lit materials draw with one of the two lightmap policies; unlit ones (holo signs, sky
     // traffic, glass) with the no-lightmap policy. Lit meshes ME1 didn't lightmap (static
     // lockers, the elevators) drew with their light environment's policy: one dominant light
-    // with diffuse and specular, plus second-order spherical harmonics for the rest.
-    public enum Policy { TextureLightmap, VertexLightmap, Unlit, LightEnvironment }
+    // with diffuse and specular, plus second-order spherical harmonics for the rest. Distortion
+    // is a material's distortion pass (ME3's effects: the biotic ripple), which writes screen
+    // offsets UE3 accumulates and then applies to the scene behind.
+    public enum Policy { TextureLightmap, VertexLightmap, Unlit, LightEnvironment, Distortion }
 
     // The base-pass shader each policy draws with (without sky light).
     public static string ShaderType(Policy policy) => policy switch
@@ -29,6 +31,7 @@ public static class ShaderTranslator
         Policy.TextureLightmap => "TBasePassPixelShaderFDirectionalLightMapTexturePolicyNoSkyLight",
         Policy.VertexLightmap => "TBasePassPixelShaderFDirectionalVertexLightMapPolicyNoSkyLight",
         Policy.LightEnvironment => "TBasePassPixelShaderFSHLightLightMapPolicyNoSkyLight",
+        Policy.Distortion => "TDistortionMeshPixelShader<FDistortMeshAccumulatePolicy>",
         _ => "TBasePassPixelShaderFNoLightMapPolicyNoSkyLight",
     };
 
@@ -38,6 +41,7 @@ public static class ShaderTranslator
         Policy.TextureLightmap => "texture",
         Policy.VertexLightmap => "vertex",
         Policy.LightEnvironment => "environment",
+        Policy.Distortion => "distortion",
         _ => "unlit",
     };
 
@@ -497,6 +501,14 @@ public static class ShaderTranslator
             {
                 _scalars.Add(int.Parse(slot.Groups[1].Value));
                 return $"pixel_scalar_{slot.Groups[1].Value}";
+            }
+            // ME2 and ME3 pack four scalars a register: UniformPixelScalars_<k> holds scalars
+            // 4k to 4k + 3.
+            if ((slot = Regex.Match(field.Name, @"^UniformPixelScalars_(\d+)$")).Success)
+            {
+                int scalar = int.Parse(slot.Groups[1].Value) * 4 + c;
+                _scalars.Add(scalar);
+                return $"pixel_scalar_{scalar}";
             }
             return field.Name switch
             {

@@ -216,6 +216,15 @@ public partial class LevelBuilder
     private int _decals, _decalMeshes, _decalsUnlit, _effects;
     private readonly Dictionary<string, int> _skipped = new();
 
+    // An effects export (PowerVfx): only ParticleAssets (and MaterialTextures, at the end), so
+    // the game's level import never mistakes it for a level, which has Lights and Collision.
+    private LevelBuilder(int maxTexture)
+    {
+        _maxTexture = maxTexture;
+        _particleAssets = _root.CreateNode("ParticleAssets");
+        _scene.AddNode(_root);
+    }
+
     public LevelBuilder(int maxTexture, string soundsDir)
     {
         _maxTexture = maxTexture;
@@ -781,12 +790,16 @@ public partial class LevelBuilder
         IMeshBuilder<MaterialBuilder> render;
         if (emitter.Mesh != null)
         {
+            // An effect's mesh may come from a shared package (SFXGame), along with its materials.
+            IMEPackage owner = emitter.Mesh.FileRef;
             if (!_geometry.TryGetValue(emitter.Mesh.InstancedFullPath, out MeshGeometry geometry))
-                _geometry[emitter.Mesh.InstancedFullPath] = geometry = ReadGeometry(pcc, emitter.Mesh, textures);
+                _geometry[emitter.Mesh.InstancedFullPath] = geometry = ReadGeometry(owner, emitter.Mesh, textures);
             MaterialBuilder overrideMaterial = emitter.OverrideMaterial && emitter.Material != null
-                ? textures.MaterialFor(emitter.Material.UIndex, emitter.Material.ObjectName.Instanced) : null;
+                ? textures.MaterialFor(emitter.Material, emitter.Material.ObjectName.Instanced) : null;
             var materials = geometry.Lod.Elements
-                .Select(e => overrideMaterial ?? textures.MaterialFor(e.Material, $"{geometry.Name}_mat{e.MaterialIndex}"))
+                .Select(e => overrideMaterial ?? (owner == pcc
+                    ? textures.MaterialFor(e.Material, $"{geometry.Name}_mat{e.MaterialIndex}")
+                    : textures.MaterialFor(TextureCache.Resolve(owner, e.Material), $"{geometry.Name}_mat{e.MaterialIndex}")))
                 .ToArray();
             render = BuildRender(geometry.WithMaterials(materials), [], textures, 0, null);
         }
@@ -795,7 +808,7 @@ public partial class LevelBuilder
             if (emitter.Material == null)
                 return null;
             var quad = new MeshBuilder<VertexPositionNormalTangent, VertexTexture2, VertexEmpty>("ParticleQuad");
-            var primitive = quad.UsePrimitive(textures.MaterialFor(emitter.Material.UIndex, emitter.Material.ObjectName.Instanced));
+            var primitive = quad.UsePrimitive(textures.MaterialFor(emitter.Material, emitter.Material.ObjectName.Instanced));
             VERTEX Corner(float x, float y) => new(
                 new VertexPositionNormalTangent(new Vector3(x, y, 0f), Vector3.UnitZ, new Vector4(1f, 0f, 0f, 1f)),
                 new VertexTexture2(new Vector2(x + 0.5f, 0.5f - y), new Vector2(x + 0.5f, 0.5f - y)));
@@ -1191,9 +1204,10 @@ public partial class LevelBuilder
             LightmapChannel = lightmapChannel,
             LightmapInRange = inRange,
             FlipWinding = MeshCommand.ShouldFlipWinding(wideIndices, gltfPositions, normals),
-            SectionMaterials = lod.Elements
-                .Select(e => DrawnMaterial(textures, e.Material, $"{meshExport.ObjectName.Instanced}_mat{e.MaterialIndex}"))
-                .ToArray(),
+            // A mesh from another package (an effect's) gets its materials from its caller.
+            SectionMaterials = textures.Package == pcc
+                ? lod.Elements.Select(e => DrawnMaterial(textures, e.Material, $"{meshExport.ObjectName.Instanced}_mat{e.MaterialIndex}")).ToArray()
+                : new MaterialBuilder[lod.Elements.Length],
             Positions = positions,
         };
 

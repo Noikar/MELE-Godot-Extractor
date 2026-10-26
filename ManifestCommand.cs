@@ -1,17 +1,21 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 
 namespace LexExport;
 
 // Exports every entry of a manifest: characters.json (character models), weapons.json (weapon
-// models), or levels.json (levels and their music). Each is the one list behind both the
-// developer scripts (Tools/export_characters.ps1, Tools/export_levels.ps1) and the game's
-// first-run extractor (players), so a new model or level goes into its manifest and nowhere else.
+// models), levels.json (levels and their music), or powers.json (powers' sounds and effects).
+// Each is the one list behind both the developer scripts (Tools/export_characters.ps1,
+// Tools/export_levels.ps1) and the game's first-run extractor (players), so a new model or
+// level goes into its manifest and nowhere else.
 //
 //   characters  -> <out>/<entry.out>               (MeshCommand, the entry's args)
 //   weapons     -> <out>/<entry.out>               (MeshCommand, the entry's args)
 //   levels      -> <out>/<id>.glb                   (LevelCommand, the entry's packages)
 //                  <out>/<id>.looks.json            (its NPCs' looks: a looks manifest)
 //                  <out>/<musicid>.ogg, music.json  (MusicCommand, the entry's music)
+//   powers      -> <out>/<id>/sounds.json, .wav    (WwiseExport, each of the entry's sounds)
+//                  <out>/<id>/vfx.glb               (PowerVfx, the entry's "vfx")
 //   <level>.looks.json -> <out>/<id>.glb            (LevelBuilder.ExportLook, one NPC look;
 //                                                   one already there is skipped, since its
 //                                                   id is a hash of everything it's made of)
@@ -44,7 +48,8 @@ public static class ManifestCommand
         bool levels = root.TryGetProperty("levels", out JsonElement levelList);
         bool weapons = root.TryGetProperty("weapons", out JsonElement weaponList);
         bool looks = root.TryGetProperty("looks", out JsonElement lookList);
-        JsonElement list = levels ? levelList : weapons ? weaponList : looks ? lookList : root.GetProperty("characters");
+        bool powers = root.TryGetProperty("powers", out JsonElement powerList);
+        JsonElement list = levels ? levelList : weapons ? weaponList : looks ? lookList : powers ? powerList : root.GetProperty("characters");
         JsonElement[] entries = list.EnumerateArray()
             .Where(e => only == null || only.Contains(e.GetProperty("id").GetString()))
             .ToArray();
@@ -63,7 +68,7 @@ public static class ManifestCommand
             string id = entry.GetProperty("id").GetString();
             // "<species>: <label>" for characters ("turian: Presidium visitor"), the label otherwise.
             string label = entry.GetProperty("label").GetString();
-            string name = levels || weapons || looks ? label : $"{entry.GetProperty("species").GetString()}: {label}";
+            string name = levels || weapons || looks || powers ? label : $"{entry.GetProperty("species").GetString()}: {label}";
             log.Direct($"PROGRESS {Interlocked.Increment(ref started)}/{entries.Length} {name}\n");
 
             string result;
@@ -76,6 +81,8 @@ public static class ManifestCommand
                         ExportLevel(entry, id, outDir);
                     else if (looks)
                         ExportLook(entry, id, outDir);
+                    else if (powers)
+                        ExportPower(entry, id, outDir);
                     else
                         ExportModel(entry, outDir);
                     result = $"OK {id}";
@@ -134,6 +141,21 @@ public static class ManifestCommand
             throw new FileNotFoundException($"{Path.GetFileName(package)} is missing from the install.");
         if (MeshCommand.Run(package, outPath, args) != 0)
             throw new InvalidOperationException("export returned an error");
+    }
+
+    // A power's sounds (Wwise): <out>/<id>/<sound>.wav and sounds.json, { <sound>: { "layers" } },
+    // and its visual effects (PowerVfx): <out>/<id>/vfx.glb.
+    private static void ExportPower(JsonElement entry, string id, string outDir)
+    {
+        string package = Program.ResolvePackage(entry.GetProperty("package").GetString());
+        string folder = Path.Combine(outDir, id);
+        var sounds = new JsonObject();
+        foreach (JsonProperty sound in entry.GetProperty("sounds").EnumerateObject())
+            sounds[sound.Name] = WwiseExport.Export(package, sound.Value.GetString(), folder, sound.Name);
+        OutputFiles.Write(Path.Combine(folder, "sounds.json"), temporary =>
+            File.WriteAllText(temporary, sounds.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+        if (entry.TryGetProperty("vfx", out JsonElement vfx))
+            LevelBuilder.ExportPowerVfx(package, vfx, Path.Combine(folder, "vfx.glb"));
     }
 
     // An NPC look, unless an earlier run (or another level's) already baked it.

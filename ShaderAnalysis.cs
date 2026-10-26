@@ -74,10 +74,10 @@ public static class ShaderAnalysis
     // The analyzed base-pass pixel shader of a Material, or null (with a reason) when the
     // package has no shader for it or the shader uses something the pass can't follow.
     public static Result Analyze(IMEPackage pcc, ExportEntry baseMaterial, ParameterLookup parameters, TextureMean mean,
-        out string failure)
+        out string failure, bool sharedCache = false)
     {
         failure = null;
-        ShaderCache cache = CacheOf(pcc);
+        ShaderCache cache = sharedCache ? CacheWithShared(pcc) : CacheOf(pcc);
         if (cache == null)
         {
             failure = "no shader cache";
@@ -116,6 +116,16 @@ public static class ShaderAnalysis
 
     internal static ShaderCache CacheOf(IMEPackage pcc) =>
         Caches.GetOrAdd(pcc.FilePath, _ => new Lazy<ShaderCache>(() => Parse(pcc))).Value;
+
+    // The package's own cache, else the game's RefShaderCache (static-mesh shaders only). ME3's
+    // and ME2's seek-free packages (powers' effects) carry no shaders of their own; the game
+    // finds them in RefShaderCache (ME3: 1.3 GB, read in about 3 s, about 2.7 GB at its peak).
+    internal static ShaderCache CacheWithShared(IMEPackage pcc) =>
+        CacheOf(pcc) ?? (pcc.FilePath != null
+            ? CacheOfFile(Path.Combine(Path.GetDirectoryName(pcc.FilePath)!, RefShaderCache), "FLocalVertexFactory")
+            : null);
+
+    internal const string RefShaderCache = "RefShaderCache-PC-D3D-SM5.upk";
 
     // A package file's shader cache, read and closed again (the shaders inspection command).
     internal static ShaderCache CacheOfFile(string path) =>
@@ -411,7 +421,7 @@ public static class ShaderAnalysis
         private int _uvRegister = -1;
         private int _opaque;
 
-        private static readonly Regex CbufferField = new(@"^//\s+float(4?) UniformPixel(Vector|Scalar)_(\d+);\s+// Offset:\s+(\d+)");
+        private static readonly Regex CbufferField = new(@"^//\s+float(4?) UniformPixel(Vector|Scalars|Scalar)_(\d+);\s+// Offset:\s+(\d+)");
         private static readonly Regex Binding = new(@"^//\s+Texture2D_(\d+)\s+texture\s+\S+\s+\S+\s+t(\d+)");
         private static readonly Regex InputRow = new(@"^//\s+TEXCOORD\s+0\s+[xyzw]+\s+(\d+)\s");
         private static readonly Regex Operand = new(@"^(?<neg>-)?(?<abs>\|)?(?<reg>[a-z]+)(?<num>\d+)?(\[(?<idx>\d+)\])?(\.(?<swz>[xyzw]+))?\|?$");
@@ -433,6 +443,12 @@ public static class ShaderAnalysis
                     {
                         for (int c = 0; c < 4; c++)
                             _uniforms[(offset / 16, c)] = (true, index, c);
+                    }
+                    // ME2 and ME3 pack them themselves: UniformPixelScalars_<k> holds 4k to 4k + 3.
+                    else if (m.Groups[2].Value == "Scalars")
+                    {
+                        for (int c = 0; c < 4; c++)
+                            _uniforms[(offset / 16, c)] = (false, index * 4 + c, 0);
                     }
                     else
                         _uniforms[(offset / 16, offset % 16 / 4)] = (false, index, 0);

@@ -37,6 +37,22 @@ System.Drawing.Common.dll                       8.0.6 (dotnet/winforms), MIT
 .NET 8 runtime (all other .dll files,           8.0.31 (dotnet/runtime), MIT, with the runtime's own
 createdump.exe, System.IO.Hashing.dll)          third-party notices reproduced at the end
 
+vgmstream (vgmstream/, decodes LE2 and LE3's Wwise audio)
+---------------------------------------------------------
+The unmodified r2117 Windows release, https://github.com/vgmstream/vgmstream/releases/tag/r2117,
+run as a separate program (vgmstream-cli.exe). Its own COPYING and README.md are in vgmstream/.
+vgmstream-cli.exe                       vgmstream, ISC-style license (vgmstream/COPYING)
+libvorbis.dll                           Xiph.Org libvorbis, BSD 3-Clause
+libspeex-1.dll                          Xiph.Org Speex, BSD 3-Clause
+libcelt-0061.dll, libcelt-0110.dll      Xiph.Org CELT, BSD 2-Clause
+libatrac9.dll                           LibAtrac9 (Thealexbarney), MIT
+libg719_decode.dll                      ITU-T G.719 reference decoder, as distributed with vgmstream
+libmpg123-0.dll                         mpg123, GNU LGPL 2.1
+avcodec-vgmstream-59.dll,               FFmpeg libraries built for vgmstream, GNU LGPL 2.1 or later.
+avformat-vgmstream-59.dll,              Their source, and how vgmstream builds them, are listed in
+avutil-vgmstream-57.dll,                vgmstream's repository at that tag (doc/BUILD.md and ext_libs/);
+swresample-vgmstream-4.dll              FFmpeg's own source is at https://ffmpeg.org/download.html.
+
 ====================================================================================================
 DirectXTex (in TexConverter.dll)
 ====================================================================================================

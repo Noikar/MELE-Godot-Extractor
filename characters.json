@@ -1,5 +1,5 @@
 {
-  "version": 7,
+  "version": 8,
   "characters": [
     {
       "id": "human_wards_a",
@@ -73,7 +73,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -148,7 +152,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -223,7 +231,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -298,7 +310,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -373,7 +389,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -448,7 +468,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -523,7 +547,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -598,7 +626,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -669,7 +701,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -744,7 +780,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -819,7 +859,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -892,7 +936,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -967,7 +1015,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -1067,7 +1119,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -1136,7 +1192,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -1205,7 +1265,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -1276,7 +1340,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -1347,7 +1415,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     },
     {
@@ -1416,7 +1488,11 @@
         "--anim",
         "BIOG_HMM_CB_A.HMM_CB_PistolDraw_CB_Draw=Draw@ME1/BIOC_Materials.pcc",
         "--anim",
-        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc"
+        "BIOG_HMM_CB_A.HMM_CB_PistolHolster_CB_Holster=Holster@ME1/BIOC_Materials.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_Start=CastStart@ME3/SFXPower_Warp.pcc",
+        "--anim",
+        "BIOG_HMM_BC_A.HMM_BC_ThrowBiotic_BC_End=CastEnd@ME3/SFXPower_Warp.pcc"
       ]
     }
   ]

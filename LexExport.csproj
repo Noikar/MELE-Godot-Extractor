@@ -49,14 +49,21 @@
     <!-- What LegendaryExplorerCore needs at runtime (managed closure plus the native texture
          and compression helpers), out of the 140 MB LEX folder. -->
     <LexRuntime Include="$(LexDir)\LegendaryExplorerCore.dll;$(LexDir)\Serilog.dll;$(LexDir)\SixLabors.ImageSharp.dll;$(LexDir)\BCnEncoder.dll;$(LexDir)\BCnEncoder.NET.ImageSharp.dll;$(LexDir)\CommunityToolkit.Diagnostics.dll;$(LexDir)\Microsoft.IO.RecyclableMemoryStream.dll;$(LexDir)\Microsoft.Toolkit.HighPerformance.dll;$(LexDir)\Newtonsoft.Json.dll;$(LexDir)\System.Drawing.Common.dll;$(LexDir)\System.IO.Hashing.dll;$(LexDir)\CompressionWrappers.dll;$(LexDir)\TexConverter.dll" />
-    <ExtractorSource Include="*.cs;*.ps1;*.md;LexExport.csproj;characters.json;weapons.json;levels.json;LICENSE;THIRD-PARTY-NOTICES.txt" />
+    <ExtractorSource Include="*.cs;*.ps1;*.md;LexExport.csproj;characters.json;weapons.json;levels.json;powers.json;LICENSE;THIRD-PARTY-NOTICES.txt" />
   </ItemGroup>
 
   <Target Name="CopyExtractorExtras" AfterTargets="Publish">
     <Copy SourceFiles="@(LexRuntime)" DestinationFolder="$(PublishDir)" />
-    <Copy SourceFiles="characters.json;weapons.json;levels.json;LICENSE;THIRD-PARTY-NOTICES.txt" DestinationFolder="$(PublishDir)" />
+    <Copy SourceFiles="characters.json;weapons.json;levels.json;powers.json;LICENSE;THIRD-PARTY-NOTICES.txt" DestinationFolder="$(PublishDir)" />
     <Copy SourceFiles="@(ExtractorSource)" DestinationFolder="$(PublishDir)source" />
     <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\lex_source.ps1&quot; -LexDir &quot;$(LexDir)&quot; -OutDir &quot;$(PublishDir)source&quot;" />
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\vgmstream.ps1&quot; -OutDir &quot;$(PublishDir).&quot;" />
+  </Target>
+
+  <!-- vgmstream-cli decodes LE2/LE3's Wwise audio (WwiseExport.cs); vgmstream.ps1 fetches the
+       pinned release once (cached in obj/) and puts it in vgmstream/ beside the build. -->
+  <Target Name="CopyVgmstream" AfterTargets="Build" Condition="!Exists('$(OutDir)vgmstream\vgmstream-cli.exe')">
+    <Exec Command="pwsh -NoProfile -File &quot;$(MSBuildProjectDirectory)\vgmstream.ps1&quot; -OutDir &quot;$(OutDir).&quot;" />
   </Target>
 
   <ItemGroup>

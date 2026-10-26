@@ -103,6 +103,7 @@ public static class Program
                 "props" when args.Length >= 3 => PropsCommand.Run(args[1], args[2]),
                 "texture" when args.Length >= 4 => TextureCommand.Run(args[1], args[2], args[3], args.Contains("--dds")),
                 "particles" when args.Length >= 3 => ParticlesCommand.Run(args[1], args[2]),
+                "vfx" when args.Length >= 3 => VfxCommand.Run(args[1], args[2]),
                 "shaders" when args.Length >= 3 => ShadersCommand.Run(args[1], args[2..]),
                 "2da" when args.Length >= 3 => TableCommand.Run(args[1], args[2]),
                 "isb" when args.Length >= 2 => IsbCommand.Run(args[1], args.Length >= 3 && args[2] != "-" ? args[2] : null,
@@ -111,6 +112,8 @@ public static class Program
                 "reflect" when args.Length >= 2 => ReflectCommand.Run(args[1]),
                 "decals" when args.Length >= 2 => DecalsCommand.Run(args[1]),
                 "refs" when args.Length >= 3 => RefsCommand.Run(args[1], args[2]),
+                "script" when args.Length >= 3 => ScriptCommand.Run(args[1], args[2..]),
+                "wwise" when args.Length >= 3 => WwiseExport.Describe(ResolvePackage(args[1]), args[2]),
                 _ => PrintUsage(),
             };
         }
@@ -150,9 +153,9 @@ public static class Program
                   Searches every package matching the glob for exports of <class> whose path
                   contains <filter>, e.g.: find <CookedPCConsole> BioH_*.pcc AnimSequence Idle
 
-              manifest <characters.json|weapons.json|levels.json> <game root> <out folder> [--only <id>,...]
-                  Exports every entry of the manifest (character or weapon models, or levels with their
-                  music) from that install into the folder, printing "PROGRESS <n>/<total>
+              manifest <characters.json|weapons.json|levels.json|powers.json> <game root> <out folder> [--only <id>,...]
+                  Exports every entry of the manifest (character or weapon models, levels with their
+                  music, or powers' sounds) from that install into the folder, printing "PROGRESS <n>/<total>
                   <name>" before each and "OK <id>" after each success (the game's first-run
                   extractor reads these lines). --only exports just those entries.
 
@@ -179,6 +182,11 @@ public static class Program
                   as stored (for working out a tinted material's recipe). --dds writes the
                   format and mips ME1 stores instead, as the exports carry them.
 
+              vfx <package.pcc> <power class>
+                  Prints a power's effect templates (from its class default, e.g.
+                  SFXPowerCustomAction_Warp): their modules, which particle emitters can be
+                  read, and each material's translation (ME3: shaders from RefShaderCache).
+
               shaders <out folder> <package.pcc>... [--filter <material>] [--skinned] [--cache <package>]
                   Writes each base Material's base-pass pixel shaders, disassembled, with its
                   uniform slots and the instances using it: <out folder>/<Material>.txt.
@@ -196,6 +204,14 @@ public static class Program
 
               reflect <filter>
                   Prints the public members of LegendaryExplorerCore types matching <filter>.
+
+              script <package.pcc> <filter>...
+                  Decompiles the UnrealScript Functions and States whose path contains a filter
+                  (and a Class whose path ends with one), for porting game behavior.
+
+              wwise <package.pcc> <filter>
+                  Prints each WwiseEvent whose path contains <filter>: its actions, the node tree
+                  they play (volumes, pitches, each sound's media and where it is), and its layers.
 
             Package paths may be written ME1/<file>.pcc (or ME2, ME3), relative to the game root.
             """);

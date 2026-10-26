@@ -404,7 +404,7 @@ public static class ShaderBaker
             if (ShaderAnalysis.CacheOf(package) is ShaderCache cache)
                 yield return cache;
         }
-        string refCache = Path.Combine(Path.GetDirectoryName(pcc.FilePath)!, "RefShaderCache-PC-D3D-SM5.upk");
+        string refCache = Path.Combine(Path.GetDirectoryName(pcc.FilePath)!, ShaderAnalysis.RefShaderCache);
         if (ShaderAnalysis.CacheOfFile(refCache, VertexFactory) is ShaderCache shared)
             yield return shared;
     }
@@ -718,6 +718,12 @@ public static class ShaderBaker
                 }
                 else if ((slot = Regex.Match(name, @"^UniformPixelScalar_(\d+)$")).Success)
                     cb[offset / 4] = (float)scalar(int.Parse(slot.Groups[1].Value))[0];
+                // ME2 and ME3 pack four scalars a register (4k to 4k + 3).
+                else if ((slot = Regex.Match(name, @"^UniformPixelScalars_(\d+)$")).Success)
+                {
+                    for (int c = 0; c < fieldSize / 4; c++)
+                        cb[offset / 4 + c] = (float)scalar(int.Parse(slot.Groups[1].Value) * 4 + c)[0];
+                }
                 else if (name == "WorldToViewMatrix")
                 {
                     for (int row = 0; row < 3; row++)

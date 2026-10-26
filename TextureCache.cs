@@ -48,6 +48,15 @@ public class TextureCache
     // railings' scanline glass), not a skinned bake, which has nothing to bake for them.
     public TextureCache UnlitSource { get; init; }
 
+    // Effects from ME2's and ME3's seek-free packages, which hold no shaders: translate from
+    // the game's RefShaderCache instead (ShaderAnalysis.CacheWithShared), along with their
+    // distortion pass.
+    public bool SharedShaders { get; init; }
+
+    private ShaderTranslator.Policy[] UnlitPolicies => SharedShaders
+        ? [ShaderTranslator.Policy.Unlit, ShaderTranslator.Policy.Distortion]
+        : [ShaderTranslator.Policy.Unlit];
+
     // A character's own appearance (a BioMaterialOverride: skin tone, hair color, face
     // textures), which wins over every material instance's defaults.
     private readonly Dictionary<string, ExportEntry> _textureOverrides = new(StringComparer.OrdinalIgnoreCase);
@@ -55,6 +64,9 @@ public class TextureCache
 
     // Material-name substrings whose sections are left out of the mesh.
     private readonly List<string> _hidden;
+
+    // The package whose material references this resolves.
+    public IMEPackage Package => _pcc;
 
     public TextureCache(IMEPackage pcc, List<string> hidden,
         Dictionary<string, MaterialBuilder> sharedMaterials = null, Dictionary<string, MemoryImage?> sharedImages = null)
@@ -109,9 +121,12 @@ public class TextureCache
 
     // materialUIndex is the SkeletalMesh's material reference for a section; fallbackName names
     // the material when that reference can't be resolved (e.g. it points at another package).
-    public MaterialBuilder MaterialFor(int materialUIndex, string fallbackName)
+    public MaterialBuilder MaterialFor(int materialUIndex, string fallbackName) =>
+        MaterialFor(materialUIndex != 0 && _pcc.TryGetUExport(materialUIndex, out ExportEntry e) ? e : null, fallbackName);
+
+    // The same for a material export of any package (an effect's, imported from SFXGame).
+    public MaterialBuilder MaterialFor(ExportEntry material, string fallbackName)
     {
-        ExportEntry material = materialUIndex != 0 && _pcc.TryGetUExport(materialUIndex, out ExportEntry e) ? e : null;
         string key = material?.InstancedFullPath ?? fallbackName;
         if (_materials.TryGetValue(key, out MaterialBuilder cached))
             return cached;
@@ -131,7 +146,7 @@ public class TextureCache
         ExportEntry baseMaterial = material != null ? BaseMaterial(material) : null;
         if (UnlitSource != null && baseMaterial?.GetProperties().GetProp<EnumProperty>("LightingModel")?.Value.Instanced == "MLM_Unlit")
         {
-            _materials[key] = UnlitSource.MaterialFor(materialUIndex, fallbackName);
+            _materials[key] = UnlitSource.MaterialFor(material, fallbackName);
             return _materials[key];
         }
         // BioWare's volumetric light shafts and glow puffs: no texture to bake, only shader
@@ -218,7 +233,7 @@ public class TextureCache
             baked = TranslucentSurface(builder, baseMaterial, textures, colors, scalars, out shading);
             // The original shader draws it in ORIGINAL mode, animated; the bake is the fallback.
             if (CarriedTextures != null && baseMaterial != null)
-                shading += AddTranslatedShader(builder, baseMaterial, material, textures, colors, scalars, alphas, ShaderTranslator.Policy.Unlit);
+                shading += AddTranslatedShader(builder, baseMaterial, material, textures, colors, scalars, alphas, UnlitPolicies);
         }
 
         if (baked)
@@ -246,7 +261,7 @@ public class TextureCache
             builder.Extras = new JsonObject { ["me_shader"] = "additive" };
             shading = ", unlit additive";
             if (CarriedTextures != null && baseMaterial != null)
-                shading += AddTranslatedShader(builder, baseMaterial, material, textures, colors, scalars, alphas, ShaderTranslator.Policy.Unlit);
+                shading += AddTranslatedShader(builder, baseMaterial, material, textures, colors, scalars, alphas, UnlitPolicies);
         }
         else if (unlit)
             shading = ", unlit";
@@ -320,7 +335,7 @@ public class TextureCache
             {
                 string name = p.GetProp<NameProperty>("ParameterName")?.Value.Instanced;
                 int uIndex = p.GetProp<ObjectProperty>("ParameterValue")?.Value ?? 0;
-                if (name != null && !textures.ContainsKey(name) && _pcc.TryGetUExport(uIndex, out ExportEntry tex))
+                if (name != null && !textures.ContainsKey(name) && Parent(current, uIndex) is ExportEntry tex)
                     textures[name] = tex;
             }
             foreach (StructProperty p in props.GetProp<ArrayProperty<StructProperty>>("VectorParameterValues") ?? Enumerable.Empty<StructProperty>())
@@ -339,10 +354,16 @@ public class TextureCache
                 if (name != null && !scalars.ContainsKey(name) && p.GetProp<FloatProperty>("ParameterValue") is FloatProperty f)
                     scalars[name] = f.Value;
             }
-            int parent = props.GetProp<ObjectProperty>("Parent")?.Value ?? 0;
-            current = _pcc.TryGetUExport(parent, out ExportEntry next) ? next : null;
+            current = Parent(current, props.GetProp<ObjectProperty>("Parent")?.Value ?? 0);
         }
     }
+
+    // What an entry's property references: an export of its own package, or with SharedShaders
+    // (effects, whose instances parent to materials in SFXGame), the shared package's export an
+    // import names. Levels keep to their own package.
+    private ExportEntry Parent(ExportEntry from, int uIndex) =>
+        SharedShaders ? Resolve(from.FileRef, uIndex)
+        : from.FileRef.TryGetUExport(uIndex, out ExportEntry export) ? export : null;
 
     // Bakes an unlit translucent material from its compiled pixel shader (ShaderAnalysis):
     // color and opacity as a constant plus weighted texture channels. Samples at the surface's
@@ -364,7 +385,7 @@ public class TextureCache
 
         string failure = "no base material";
         ShaderAnalysis.Result shader = baseMaterial != null
-            ? ShaderAnalysis.Analyze(_pcc, baseMaterial, Parameter, Mean, out failure)
+            ? ShaderAnalysis.Analyze(_pcc, baseMaterial, Parameter, Mean, out failure, SharedShaders)
             : null;
         if (shader == null)
             return Additive(builder, $"shader not read: {failure}", out note);
@@ -451,21 +472,34 @@ public class TextureCache
             && textures.TryGetValue(parameter.ParameterName.Instanced, out ExportEntry overridden))
             return overridden;
         defaults ??= ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
-        return expression.TextureIndex < defaults.Length && Resolve(defaults[expression.TextureIndex]) is ExportEntry texture
-            && texture.ClassName == "Texture2D" ? texture : null;
+        return expression.TextureIndex < defaults.Length && Resolve(baseMaterial.FileRef, defaults[expression.TextureIndex]) is ExportEntry texture
+            && texture.ClassName is "Texture2D" or "TextureFlipBook" ? texture : null;
     }
 
-    // ME1 keeps shared effect textures (the holograms', distortion maps) in BIOC_Materials,
-    // which the game always has loaded; levels import them from there.
-    // An export of this package, or the global package's export that an import names.
-    private ExportEntry Resolve(int uIndex)
+    // Packages the game always has loaded, which hold shared effect textures that other
+    // packages import: ME1's BIOC_Materials (the holograms', distortion maps); ME3's SFXGame
+    // and Startup (BioVFX_Z_TEXTURES: the powers' gradients and noise), and ME2's SFXGame.
+    private static readonly Dictionary<MEGame, string[]> SharedPackages = new()
     {
-        if (_pcc.TryGetUExport(uIndex, out ExportEntry export))
+        [MEGame.LE1] = ["BIOC_Materials.pcc"],
+        [MEGame.LE2] = ["SFXGame.pcc"],
+        [MEGame.LE3] = ["SFXGame.pcc", "Startup.pcc"],
+    };
+
+    // An export of the package, or the shared package export that an import names.
+    internal static ExportEntry Resolve(IMEPackage pcc, int uIndex)
+    {
+        if (pcc.TryGetUExport(uIndex, out ExportEntry export))
             return export;
-        if (_pcc.GetEntry(uIndex) is not ImportEntry import || _pcc.FilePath == null)
+        if (pcc.GetEntry(uIndex) is not ImportEntry import || pcc.FilePath == null)
             return null;
-        string path = Path.Combine(Path.GetDirectoryName(_pcc.FilePath)!, "BIOC_Materials.pcc");
-        return EntryScope.OpenShared(path)?.FindExport(import.InstancedFullPath);
+        foreach (string file in SharedPackages.GetValueOrDefault(pcc.Game, ["BIOC_Materials.pcc"]))
+        {
+            string path = Path.Combine(Path.GetDirectoryName(pcc.FilePath)!, file);
+            if (EntryScope.OpenShared(path)?.FindExport(import.InstancedFullPath) is ExportEntry found)
+                return found;
+        }
+        return null;
     }
 
     // Adds the material's normal map and a roughness map baked from its specular map, picked
@@ -511,7 +545,7 @@ public class TextureCache
     private string AddTranslatedShader(MaterialBuilder builder, ExportEntry baseMaterial, ExportEntry material, Dictionary<string, ExportEntry> textures,
         Dictionary<string, Vector3> colors, Dictionary<string, float> scalars, Dictionary<string, float> alphas, params ShaderTranslator.Policy[] policies)
     {
-        ShaderCache cache = ShaderAnalysis.CacheOf(_pcc);
+        ShaderCache cache = SharedShaders ? ShaderAnalysis.CacheWithShared(_pcc) : ShaderAnalysis.CacheOf(_pcc);
         string staticNote = null;
         int[] defaults = null;
         MaterialShaderMap map = cache != null ? ShaderAnalysis.ShaderMapOf(cache, material, baseMaterial, out defaults, out staticNote) : null;
@@ -558,8 +592,11 @@ public class TextureCache
             if (reference == null || !cache.Shaders.TryGetValue(reference.Id, out Shader shader))
             {
                 // A lit material's unlit translation is only for particles, and its light
-                // environment one only for meshes ME1 didn't lightmap; most have neither.
-                if (!(policy is ShaderTranslator.Policy.Unlit or ShaderTranslator.Policy.LightEnvironment && policies.Length > 1))
+                // environment one only for meshes ME1 didn't lightmap; most have neither. Only
+                // materials that distort have a distortion pass.
+                if (!(policy is ShaderTranslator.Policy.Unlit or ShaderTranslator.Policy.LightEnvironment
+                        && policies.Contains(ShaderTranslator.Policy.TextureLightmap))
+                    && policy != ShaderTranslator.Policy.Distortion)
                     notes.Add($"{key}: no shader");
                 continue;
             }
@@ -626,8 +663,18 @@ public class TextureCache
                 animated[name] = "in_color";
                 return;
             }
+            // A flipbook's frame offset (the shader scales the UVs to one frame itself).
+            if (vector && expression is MaterialUniformExpressionTexture flipBook && expression is not MaterialUniformExpressionTextureParameter
+                && FlipBookOffset(flipBook, baseMaterial, defaults) is string offset)
+            {
+                parameters[name] = new JsonArray(0, 0, 0, 0);
+                animated[name] = offset;
+                return;
+            }
             bool varies = false;
             double[] value = expression != null ? ShaderAnalysis.Evaluate(expression, Parameter, ref varies) : null;
+            if (value == null && expression != null)
+                notes.Add($"{name} unknown ({expression.GetType().Name}, 0)");
             value ??= [0, 0, 0, 0];
             string Component(string[] values, int i) => values[Math.Min(i, values.Length - 1)];
             if (vector)
@@ -670,7 +717,7 @@ public class TextureCache
         }
         // A lit material's unlit translation is only for particles, even when its lightmap
         // translations failed (the game tells them apart by this flag).
-        if (policies.Any(p => p != ShaderTranslator.Policy.Unlit))
+        if (policies.Any(p => p is not (ShaderTranslator.Policy.Unlit or ShaderTranslator.Policy.Distortion)))
             extras["lit"] = true;
         // How the unlit translation blends: BLEND_Translucent (alpha) or BLEND_Additive.
         extras["blend"] = baseMaterial.GetProperties().GetProp<EnumProperty>("BlendMode")?.Value.Instanced ?? "BLEND_Opaque";
@@ -681,6 +728,36 @@ public class TextureCache
         return $", translated ({string.Join(", ", translatedKeys)}"
             + (used.Cubes.Count > 0 ? $", {used.Cubes.Count} cubemap(s)" : "")
             + (notes.Count > 0 ? "; " + string.Join("; ", notes) : "") + ")";
+    }
+
+    // A TextureFlipBook's current frame offset as GLSL over TIME, as UE3's UTextureFlipBook
+    // ticks it: FrameRate frames a second through HorizontalImages x VerticalImages, looping, in
+    // the order FBMethod gives (rows or columns, from one of the four corners). Null when the
+    // slot's texture isn't a flipbook.
+    private string FlipBookOffset(MaterialUniformExpressionTexture expression, ExportEntry baseMaterial, int[] defaults)
+    {
+        defaults ??= ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
+        if (expression.TextureIndex >= defaults.Length || Resolve(baseMaterial.FileRef, defaults[expression.TextureIndex]) is not ExportEntry book
+            || book.ClassName != "TextureFlipBook")
+            return null;
+        var props = book.GetProperties();
+        int columns = Math.Max(props.GetProp<IntProperty>("HorizontalImages")?.Value ?? 1, 1);
+        int rows = Math.Max(props.GetProp<IntProperty>("VerticalImages")?.Value ?? 1, 1);
+        float rate = props.GetProp<FloatProperty>("FrameRate")?.Value ?? 4f;
+        string method = props.GetProp<EnumProperty>("FBMethod")?.Value.Instanced ?? "TFBM_UL_ROW";
+        string F(double v) => v.ToString("0.0#####", System.Globalization.CultureInfo.InvariantCulture);
+        // The frame, then its position along and across the reading direction.
+        string frame = $"mod(floor(TIME * {F(rate)}), {F(columns * rows)})";
+        bool byRow = !method.EndsWith("_COL");
+        string along = byRow ? $"mod({frame}, {F(columns)})" : $"mod({frame}, {F(rows)})";
+        string across = byRow ? $"floor({frame} / {F(columns)})" : $"floor({frame} / {F(rows)})";
+        string column = byRow ? along : across, row = byRow ? across : along;
+        // Starting from the right or the bottom counts that axis backwards.
+        if (method.StartsWith("TFBM_UR") || method.StartsWith("TFBM_LR"))
+            column = $"({F(columns - 1)} - {column})";
+        if (method.StartsWith("TFBM_LL") || method.StartsWith("TFBM_LR"))
+            row = $"({F(rows - 1)} - {row})";
+        return $"vec4({column} / {F(columns)}, {row} / {F(rows)}, 0.0, 0.0)";
     }
 
     // Decodes a texture into CarriedTextures under the key, once. False when it can't be read.
@@ -787,8 +864,7 @@ public class TextureCache
             // DecalMaterial is a Material subclass (the Chora's Den sign).
             if (current.ClassName is "Material" or "DecalMaterial")
                 return current;
-            int parent = current.GetProperties().GetProp<ObjectProperty>("Parent")?.Value ?? 0;
-            current = _pcc.TryGetUExport(parent, out ExportEntry next) ? next : null;
+            current = Parent(current, current.GetProperties().GetProp<ObjectProperty>("Parent")?.Value ?? 0);
         }
         return null;
     }

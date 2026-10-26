@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "powers": [
+    {
+      "id": "warp",
+      "label": "Warp",
+      "note": "ME3's Warp (SFXPowerCustomAction_Warp: CastSound, ImpactSound), plus the cast clip's cloth foley (HMM_BC_ThrowBiotic's SFXAnimNotify_RaceWwiseEvent).",
+      "package": "ME3/SFXPower_Warp.pcc",
+      "vfx": { "power": "SFXPowerCustomAction_Warp" },
+      "sounds": {
+        "cast": "Wwise_Power_Biotic_Warp.Play_power_biotic_P_warp_cast",
+        "impact": "Wwise_Power_Biotic_Warp.Play_power_biotic_P_warp_impact",
+        "foley": "Wwise_Generic_Foley.Play_foley_movement_soft_fast"
+      }
+    },
+    {
+      "id": "lift",
+      "label": "Lift",
+      "note": "ME3 has no Lift; its Pull (SFXPowerCustomAction_Pull: CastSound, ImpactSound) floats the target the same way, so Lift sounds and looks like it (its lift crust is named here: only code references it).",
+      "package": "ME3/SFXPower_Pull.pcc",
+      "vfx": { "power": "SFXPowerCustomAction_Pull", "target": "BioVFX_B_Pull.VCFX.Pull_Lift_Crust_VCFX" },
+      "sounds": {
+        "cast": "Wwise_Power_Biotic_Pull.Play_power_biotic_P_pull_cast",
+        "impact": "Wwise_Power_Biotic_Pull.Play_power_biotic_P_pull_impact"
+      }
+    }
+  ]
+}
