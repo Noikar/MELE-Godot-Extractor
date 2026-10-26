@@ -100,7 +100,7 @@ public static class Program
                 "2da" when args.Length >= 3 => TableCommand.Run(args[1], args[2]),
                 "isb" when args.Length >= 2 => IsbCommand.Run(args[1], args.Length >= 3 && args[2] != "-" ? args[2] : null,
                     args.Length >= 4 ? args[3] : null),
-                "streambank" when args.Length >= 3 => StreamBankCommand.Run(args[1], args[2]),
+                "streambank" when args.Length >= 3 => StreamBankCommand.Run(args[1], args[2], args.Contains("--raw")),
                 "reflect" when args.Length >= 2 => ReflectCommand.Run(args[1]),
                 "decals" when args.Length >= 2 => DecalsCommand.Run(args[1]),
                 "refs" when args.Length >= 3 => RefsCommand.Run(args[1], args[2]),
@@ -184,7 +184,7 @@ public static class Program
               isb <bank.isb> [out folder|-] [filter]
                   Lists an ISACT bank's samples (by indx), and with a folder, extracts them.
 
-              streambank <package.pcc> <export path>
+              streambank <package.pcc> <export path> [--raw]
                   Prints a BioSoundNodeWaveStreamingData's ISACT index as a chunk tree.
 
               reflect <filter>

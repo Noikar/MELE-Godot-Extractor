@@ -63,13 +63,16 @@ public static class LevelCommand
     // "--sounds <dir>" (where placeables' and ambient sounds go; default: the .glb's folder),
     // "--npcs <tag patterns>" (comma-separated BioPawn Tags to export as NPCs, e.g. *_amb_*,Keeper),
     // and "--music-volumes <package> <MusicIDs>" (the BioMusicVolumes of another package, usually
-    // the persistent level, whose MusicID is one of the comma-separated IDs; see LevelAudio.cs).
+    // the persistent level, whose MusicID is one of the comma-separated IDs; see LevelAudio.cs),
+    // and "--stream-volumes <package>" (the BioTriggerStreams of another package, usually the
+    // persistent level, that show the level's chunks; see LevelAudio.cs).
     public static int Run(string outPath, string[] args)
     {
         LevelBuilder.DroppedSections.Clear();
         var patterns = new List<string>();
         var markerSources = new List<(string Package, string Tags)>();
         var musicSources = new List<(string Package, string[] Ids)>();
+        var streamSources = new List<string>();
         string npcs = null;
         int maxTexture = 1024;
         string soundsDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
@@ -83,6 +86,8 @@ public static class LevelCommand
                 markerSources.Add((args[++i], args[++i]));
             else if (args[i] == "--music-volumes" && i + 2 < args.Length)
                 musicSources.Add((args[++i], args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+            else if (args[i] == "--stream-volumes" && i + 1 < args.Length)
+                streamSources.Add(args[++i]);
             else if (args[i] == "--npcs" && i + 1 < args.Length)
                 npcs = args[++i];
             else
@@ -115,6 +120,12 @@ public static class LevelCommand
         {
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(package).First());
             builder.AddMusicVolumes(pcc, ids);
+        }
+        var chunks = files.Select(f => LevelBuilder.Chunk(Path.GetFileNameWithoutExtension(f))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        foreach (string package in streamSources)
+        {
+            using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(package).First());
+            builder.AddStreamVolumes(pcc, chunks);
         }
         builder.Write(outPath);
         MaterialBaker.ForgetDecoded();
@@ -1594,7 +1605,7 @@ public partial class LevelBuilder
         Console.WriteLine($"Skeletal placeables: {_skeletalPlaceables} from {_skeletalAssets.Count} models, "
             + $"{_sounds.Values.Count(v => v != null)} of {_sounds.Count} sounds to {_soundsDir}.");
         Console.WriteLine($"Placeable effects: {_effects}.");
-        Console.WriteLine($"Ambient sounds: {_ambientSounds} ({_ambientMusic} music); music volumes: {_musicVolumeCount}.");
+        Console.WriteLine($"Ambient sounds: {_ambientSounds} ({_ambientMusic} music); music volumes: {_musicVolumeCount}; stream volumes: {_streamVolumeCount}.");
         if (_pawnsNode != null)
         {
             Console.WriteLine($"NPCs: {_pawns} from {_pawnAssets.Count} looks; {_pawnsAtStations} at action stations, "

@@ -164,6 +164,9 @@ public static class ManifestCommand
         // The music volumes of those MusicIDs, from another package (the persistent level).
         if (entry.TryGetProperty("music_volumes", out JsonElement musicVolumes) && musicIds.Length > 0)
             args.AddRange(["--music-volumes", musicVolumes.GetString(), string.Join(",", musicIds)]);
+        // The streaming volumes that show the level's areas, from the same kind of package.
+        if (entry.TryGetProperty("stream_volumes", out JsonElement streamVolumes))
+            args.AddRange(["--stream-volumes", streamVolumes.GetString()]);
         if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray()) != 0)
             throw new InvalidOperationException("level export returned an error");
 

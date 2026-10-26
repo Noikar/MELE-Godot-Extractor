@@ -7,11 +7,15 @@ namespace LexExport;
 // Prints the chunk tree of a BioSoundNodeWaveStreamingData's paired banks: the ISACT index
 // (sound events, their tracks, and BufferIndex values) that MusicCommand follows to a sample.
 // A SoundNodeWave that isn't streamed (one-shot effects, e.g. doors) carries its own pair in
-// its RawData, which this prints too.
+// its RawData, which this prints too. With raw, chunks LEX doesn't parse (ISACT entities:
+// secl, secp, ecac, trck, ...) print their bytes in full instead of just their length.
 public static class StreamBankCommand
 {
-    public static int Run(string package, string path)
+    private static bool _raw;
+
+    public static int Run(string package, string path, bool raw = false)
     {
+        _raw = raw;
         using IMEPackage pcc = MEPackageHandler.OpenMEPackage(Program.ResolvePackage(package));
         ExportEntry export = pcc.Exports.FirstOrDefault(e => e.InstancedFullPath.Equals(path, StringComparison.OrdinalIgnoreCase));
         if (export == null)
@@ -43,7 +47,16 @@ public static class StreamBankCommand
             FloatBankChunk f => $"{f.HumanName}={f.Value}",
             SampleOffsetBankChunk s => $"offset={s.SampleOffset}",
             GroupBankChunk g => g.Value,
-            _ => c.RawData != null && c.RawData.Length <= 16 ? BitConverter.ToString(c.RawData) : $"{c.RawData?.Length} bytes",
+            // Each track: its sample (BufferIndex, low 16 bits), playlist chance, gain range, and
+            // position (a Spatial Path, or a fixed offset from the emitter).
+            SoundEventSoundTracksFour t => string.Join("; ", t.SoundTracks.Select(k =>
+                $"buffer {k.BufferIndex & 0xFFFF} chance {k.Chance} gain {k.MinGain}-{k.MaxGain} pitch {k.MinPitch}-{k.MaxPitch} path {k.PathIndex} pos {k.Position}")),
+            SoundEventInfoBankChunk e => $"selection={e.EventSelection} chance={e.DefaultChance} equal={e.EqualChance} flags=0x{e.Flags:X}",
+            BufferDistanceBankChunk d => $"min={d.MinDistance} max={d.MaxDistance} modifier={d.DistanceLevel} flags=0x{d.DistanceFlags:X}",
+            // A sound event's silence (music.md): playlist slot, chance, min ms, max ms, enabled.
+            _ when c.ChunkName == "silt" && c.RawData?.Length == 20 =>
+                $"slot={BitConverter.ToInt32(c.RawData, 0)} chance={BitConverter.ToInt32(c.RawData, 4)} min={BitConverter.ToInt32(c.RawData, 8)} ms max={BitConverter.ToInt32(c.RawData, 12)} ms enabled={BitConverter.ToInt32(c.RawData, 16)}",
+            _ => c.RawData != null && (c.RawData.Length <= 16 || (_raw && c is not DataBankChunk)) ? BitConverter.ToString(c.RawData) : $"{c.RawData?.Length} bytes",
         };
         Console.WriteLine($"{indent}{c.ChunkName} [{c.GetType().Name}] {value}");
         if (c.SubChunks != null)

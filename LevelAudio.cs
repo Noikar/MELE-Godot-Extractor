@@ -1,5 +1,6 @@
 using System.Numerics;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
 using LegendaryExplorerCore.Unreal.BinaryConverters;
@@ -21,15 +22,30 @@ namespace LexExport;
 //                        The game plays the MusicID's track (MusicCommand) while the player
 //                        is inside; a MusicID whose track is MUSIC_NONE (Flux, Chora's Den)
 //                        silences the area music there, leaving the clubs' AmbientSounds.
+//   StreamVolumes/<chunk>_<n>  one empty node per BioTriggerStream (from --stream-volumes)
+//                        that shows one of the level's chunks, whose extras ("stream_volume")
+//                        hold the chunk it belongs to ("in_chunk"), the level's chunks it makes
+//                        visible ("visible", its first streaming state: Default, free roam;
+//                        the others are plot and cutscene states), and its brush as hulls.
+//                        ME1 shows only the chunks the volume the player last entered lists,
+//                        so an area's ambient sounds (each carries its "chunk") play only
+//                        there: Flux's unattenuated air loop isn't heard on the concourse.
 //
 // AmbientSounds live in the _SND sublevels (and some _DSG ones: Chora's Den's music is in
 // BIOA_STA60_05A_DSG). Music volumes live in a location's persistent level (BIOA_STA00 for
-// the whole Citadel), so only those whose MusicID the level asks for are exported.
+// the whole Citadel), so only those whose MusicID the level asks for are exported. So do the
+// stream volumes; a chunk is a package name without its _LAY/_ART/_PLC/_DSG/_SND suffix
+// (BIOA_STA60_09_SND is in chunk BIOA_STA60_09, BIOA_STA60_05A_DSG in BIOA_STA60_05A).
 public partial class LevelBuilder
 {
     private NodeBuilder _ambientNode;
     private NodeBuilder _musicVolumesNode;
-    private int _ambientSounds, _ambientMusic, _musicVolumeCount;
+    private NodeBuilder _streamVolumesNode;
+    private int _ambientSounds, _ambientMusic, _musicVolumeCount, _streamVolumeCount;
+
+    // A package's streaming chunk: its name without the sublevel kind.
+    public static string Chunk(string packageName) =>
+        Regex.Replace(packageName, "_(LAY|ART|PLC|DSG|SND)$", "", RegexOptions.IgnoreCase);
 
     private bool IsAmbientSound(ExportEntry actor, PropertyCollection props) =>
         actor.ClassName.StartsWith("AmbientSound", StringComparison.Ordinal) && props.GetProp<ObjectProperty>("AudioComponent") != null;
@@ -80,6 +96,7 @@ public partial class LevelBuilder
 
         _ambientNode ??= _root.CreateNode("AmbientSounds");
         string packageName = Path.GetFileNameWithoutExtension(pcc.FilePath);
+        ambient["chunk"] = Chunk(packageName);
         var node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["ambient_sound"] = ambient });
         _ambientNode.AddNode(node);
         node.LocalMatrix = Matrix4x4.CreateTranslation(UnrealSpace.Position(actorToWorld.Translation));
@@ -107,20 +124,7 @@ public partial class LevelBuilder
                 || brush.GetProperties().GetProp<StructProperty>("BrushAggGeom") is not StructProperty agg)
                 continue;
 
-            Matrix4x4 actorToWorld = UnrealTransform.ActorToWorld(props);
-            var hulls = new JsonArray();
-            foreach (Vector3[] hull in ReadAggGeom(agg))
-            {
-                var points = new JsonArray();
-                foreach (Vector3 p in hull)
-                {
-                    Vector3 world = UnrealSpace.Position(Vector3.Transform(p, actorToWorld));
-                    points.Add(world.X);
-                    points.Add(world.Y);
-                    points.Add(world.Z);
-                }
-                hulls.Add(points);
-            }
+            JsonArray hulls = BrushHulls(props, agg);
             if (hulls.Count == 0)
                 continue;
             int priority = props.GetProp<IntProperty>("MusicPriority")?.Value ?? 0;
@@ -132,5 +136,68 @@ public partial class LevelBuilder
             found.Add($"{musicId} ({hulls.Count} hulls, priority {priority})");
         }
         Console.WriteLine($"{Path.GetFileNameWithoutExtension(pcc.FilePath)}: music volumes {(found.Count > 0 ? string.Join(", ", found) : "none")}.");
+    }
+
+    // The BioTriggerStreams of a package (a location's persistent level) that show any of the
+    // level's chunks, each with its first streaming state's chunk and visible chunks (only the
+    // level's own) and its brush's convex hulls.
+    public void AddStreamVolumes(IMEPackage pcc, HashSet<string> chunks)
+    {
+        ExportEntry levelExport = pcc.Exports.FirstOrDefault(e => e.ClassName == "Level");
+        if (levelExport == null)
+            return;
+        _streamVolumesNode ??= _root.CreateNode("StreamVolumes");
+        int found = 0;
+        foreach (int actorIndex in ObjectBinary.From<Level>(levelExport).Actors)
+        {
+            if (actorIndex == 0 || !pcc.TryGetUExport(actorIndex, out ExportEntry actor) || actor.ClassName != "BioTriggerStream")
+                continue;
+            PropertyCollection props = actor.GetProperties();
+            StructProperty state = props.GetProp<ArrayProperty<StructProperty>>("StreamingStates")?.FirstOrDefault();
+            if (state == null)
+                continue;
+            string inChunk = state.Properties.GetProp<NameProperty>("InChunkName")?.Value.Instanced ?? "";
+            var visible = new JsonArray();
+            foreach (NameProperty name in state.Properties.GetProp<ArrayProperty<NameProperty>>("VisibleChunkNames") ?? Enumerable.Empty<NameProperty>())
+            {
+                if (chunks.Contains(name.Value.Instanced))
+                    visible.Add(name.Value.Instanced);
+            }
+            if ((!chunks.Contains(inChunk) && visible.Count == 0)
+                || props.GetProp<ObjectProperty>("BrushComponent") is not ObjectProperty brushRef
+                || !pcc.TryGetUExport(brushRef.Value, out ExportEntry brush)
+                || brush.GetProperties().GetProp<StructProperty>("BrushAggGeom") is not StructProperty agg)
+                continue;
+            JsonArray hulls = BrushHulls(props, agg);
+            if (hulls.Count == 0)
+                continue;
+            _streamVolumesNode.AddNode(new NodeBuilder($"{inChunk}_{_streamVolumeCount}", new JsonObject
+            {
+                ["stream_volume"] = new JsonObject { ["in_chunk"] = inChunk, ["visible"] = visible, ["hulls"] = hulls },
+            }));
+            _streamVolumeCount++;
+            found++;
+        }
+        Console.WriteLine($"{Path.GetFileNameWithoutExtension(pcc.FilePath)}: {found} stream volumes for {chunks.Count} chunks.");
+    }
+
+    // A volume's brush as convex hulls in glTF space: flat [x, y, z, ...] point lists.
+    private static JsonArray BrushHulls(PropertyCollection props, StructProperty agg)
+    {
+        Matrix4x4 actorToWorld = UnrealTransform.ActorToWorld(props);
+        var hulls = new JsonArray();
+        foreach (Vector3[] hull in ReadAggGeom(agg))
+        {
+            var points = new JsonArray();
+            foreach (Vector3 p in hull)
+            {
+                Vector3 world = UnrealSpace.Position(Vector3.Transform(p, actorToWorld));
+                points.Add(world.X);
+                points.Add(world.Y);
+                points.Add(world.Z);
+            }
+            hulls.Add(points);
+        }
+        return hulls;
     }
 }
