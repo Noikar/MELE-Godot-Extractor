@@ -26,7 +26,9 @@ public static class MeshCommand
     // options and "--check <AnimSequence path>[@package.pcc]" (prints the animation-convention
     // check and exits). "@package.pcc" pulls the clip from another package in the same folder
     // (or "@ME2/package.pcc" from another game's), for shared skeletons (e.g. a human-male
-    // idle on a salarian). "--bind <Bone,Bone,...>" after an --anim holds those bones at their bind pose in that clip. "--mat <MaterialInstance>,..."
+    // idle on a salarian). "--bind <Bone,Bone,...>" after an --anim holds those bones at their bind pose in that clip.
+    // "--add <AnimSequence>[@package.pcc],<AnimSequence>[@package.pcc]" after an --anim adds the
+    // first held pose's difference from the second (ME2's additive idle offset) to that clip. "--mat <MaterialInstance>,..."
     // after a mesh replaces its materials in slot order (another color variant of the same
     // armor). "--morph <BioMorphFace>" adds a morph-target head (the base head with the
     // character's face applied), its hair, and the character's appearance overrides.
@@ -45,6 +47,8 @@ public static class MeshCommand
         var hidden = new List<string>();
         var pawnOverrides = new List<string>();
         var anims = new List<(string Path, string Clip, string Package, List<string> Bind)>();
+        // Per --anim index: the (pose, base) of its additive, each "path[@package.pcc]".
+        var additives = new Dictionary<int, (string Pose, string Base)>();
         (string Path, string Package)? check = null;
         bool sounds = false;
         string vfx = null;
@@ -62,6 +66,13 @@ public static class MeshCommand
             }
             else if (args[i] == "--bind" && i + 1 < args.Length && anims.Count > 0)
                 anims[^1].Bind.AddRange(args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            else if (args[i] == "--add" && i + 1 < args.Length && anims.Count > 0)
+            {
+                string[] pair = args[++i].Split(',', 2, StringSplitOptions.TrimEntries);
+                if (pair.Length != 2)
+                    throw new ArgumentException($"--add takes <pose>,<base>, not '{args[i]}'.");
+                additives[anims.Count - 1] = (pair[0], pair[1]);
+            }
             else if (args[i] == "--mat" && i + 1 < args.Length && meshPaths.Count > 0)
                 materialSwaps[meshPaths.Count - 1] = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             else if (args[i] == "--morph" && i + 1 < args.Length)
@@ -148,9 +159,18 @@ public static class MeshCommand
             var clipSounds = new JsonObject();
             var soundCache = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
             string outDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
-            foreach (var (animPath, clip, package, bind) in anims)
+            for (int a = 0; a < anims.Count; a++)
             {
-                AnimationBaker.Bake(PackageFor(package), animPath, clip, skeleton, joints, inPlace: true, bind);
+                var (animPath, clip, package, bind) = anims[a];
+                AnimationBaker.AdditivePose additive = null;
+                if (additives.TryGetValue(a, out var pair))
+                {
+                    string[] pose = pair.Pose.Split('@', 2);
+                    string[] from = pair.Base.Split('@', 2);
+                    additive = new AnimationBaker.AdditivePose(PackageFor(pose.Length > 1 ? pose[1] : null), pose[0],
+                        PackageFor(from.Length > 1 ? from[1] : null), from[0]);
+                }
+                AnimationBaker.Bake(PackageFor(package), animPath, clip, skeleton, joints, inPlace: true, bind, additive: additive);
                 if (sounds && SoundExport.ClipSounds(PackageFor(package), FindExport(PackageFor(package), animPath, "AnimSequence"), outDir, soundCache) is JsonArray played)
                     clipSounds[clip] = played;
             }

@@ -21,10 +21,14 @@ public static class AnimationBaker
     // neck and head when a borrowed human clip droops a salarian's longer neck. compact leaves
     // out the translation tracks of bones that keep their bind translation and writes a single
     // key for tracks that never change; a level's NPC clips use it (the game retargets them by
-    // bone name, so bones without a track keep their own model's rest pose). Returns how many of
-    // the clip's tracks found a bone (0: nothing was baked).
+    // bone name, so bones without a track keep their own model's rest pose). additive adds a held
+    // pose's difference from a base pose on top of the clip, as ME2's BioAnimNodeBlendAdditive does
+    // (a krogan's pistol hold, KRO_CB_Pistol_CB_IdleOffset minus KRO_CB_Rifle_CB_IdlePose, over its
+    // rifle locomotion): per bone, rotation = (pose * base^-1) * clip and position += pose - base.
+    // Returns how many of the clip's tracks found a bone (0: nothing was baked).
     public static int Bake(IMEPackage pcc, string sequencePath, string clipName, MergedSkeleton skeleton,
-        NodeBuilder[] joints, bool inPlace, IReadOnlyCollection<string> bindBones = null, bool compact = false)
+        NodeBuilder[] joints, bool inPlace, IReadOnlyCollection<string> bindBones = null, bool compact = false,
+        AdditivePose additive = null)
     {
         ExportEntry export = pcc.FindExport(sequencePath)
             ?? throw new ArgumentException($"No export '{sequencePath}' in {Path.GetFileName(pcc.FilePath)}.");
@@ -56,6 +60,8 @@ public static class AnimationBaker
             bool holdBind = bindBones != null && bindBones.Contains(psa.Bones[b].Name, StringComparer.OrdinalIgnoreCase);
             bool useTranslation = !holdBind && (translated == null || translated.Contains(psa.Bones[b].Name) || b == rootBone);
             MergedSkeleton.Bone bind = skeleton.Bones[joint];
+            (Quaternion Rotation, Vector3 Offset) delta = (Quaternion.Identity, Vector3.Zero);
+            bool added = !holdBind && additive != null && additive.Deltas.TryGetValue(psa.Bones[b].Name, out delta);
 
             Vector3 firstPos = FromPsa(psa.Keys[info.FirstRawFrame * boneCount + b].Position);
             var positions = new Vector3[frames];
@@ -68,6 +74,12 @@ public static class AnimationBaker
                     pos = new Vector3(firstPos.X, firstPos.Y, pos.Z);
                 positions[f] = useTranslation ? UnrealSpace.Position(pos) : bind.Translation;
                 rotations[f] = holdBind ? bind.Rotation : UnrealSpace.Rotation(FromPsa(key.Rotation));
+                if (added)
+                {
+                    rotations[f] = Quaternion.Normalize(delta.Rotation * rotations[f]);
+                    if (useTranslation)
+                        positions[f] += delta.Offset;
+                }
             }
 
             if (!compact || useTranslation)
@@ -94,9 +106,49 @@ public static class AnimationBaker
             speed = new Vector2(end.X - start.X, end.Y - start.Y).Length() * UnrealSpace.UnitsToMeters / ((frames - 1) / rate);
         }
 
+        string addedNote = additive == null ? ""
+            : $", plus {additive.Name} on {additive.Deltas.Keys.Count(bone => psa.Bones.Any(p => p.Name.Equals(bone, StringComparison.OrdinalIgnoreCase)))}/{additive.Deltas.Count} of its moving bones";
         Console.WriteLine($"  anim {clipName}: {frames} frames @ {rate:F0} fps ({frames / rate:F2} s), "
-            + $"{boneCount - skipped}/{boneCount} tracks mapped{(bindBones?.Count > 0 ? $", held at bind: {string.Join(", ", bindBones)}" : "")}, root speed {speed:F2} m/s{(inPlace ? " (removed, in place)" : "")}.");
+            + $"{boneCount - skipped}/{boneCount} tracks mapped{(bindBones?.Count > 0 ? $", held at bind: {string.Join(", ", bindBones)}" : "")}{addedNote}, root speed {speed:F2} m/s{(inPlace ? " (removed, in place)" : "")}.");
         return boneCount - skipped;
+    }
+
+    // A held pose's per-bone difference from a base pose (both read at their first frame, in glTF
+    // space), for Bake's additive. Bones that don't move from the base are left out.
+    public sealed class AdditivePose
+    {
+        public string Name { get; }
+        public Dictionary<string, (Quaternion Rotation, Vector3 Offset)> Deltas { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        public AdditivePose(IMEPackage posePcc, string posePath, IMEPackage basePcc, string basePath)
+        {
+            Dictionary<string, (Quaternion Rotation, Vector3 Position)> pose = FirstFrame(posePcc, posePath);
+            Dictionary<string, (Quaternion Rotation, Vector3 Position)> from = FirstFrame(basePcc, basePath);
+            Name = $"{posePath.Split('.').Last()} - {basePath.Split('.').Last()}";
+            foreach (var (bone, key) in pose)
+            {
+                if (!from.TryGetValue(bone, out var start))
+                    continue;
+                Quaternion turn = Quaternion.Normalize(key.Rotation * Quaternion.Inverse(start.Rotation));
+                Vector3 offset = key.Position - start.Position;
+                if (AngleBetween(turn, Quaternion.Identity) > 0.05 || offset.Length() > 1e-4f)
+                    Deltas[bone] = (turn, offset);
+            }
+        }
+
+        private static Dictionary<string, (Quaternion Rotation, Vector3 Position)> FirstFrame(IMEPackage pcc, string sequencePath)
+        {
+            ExportEntry export = pcc.FindExport(sequencePath)
+                ?? throw new ArgumentException($"No export '{sequencePath}' in {Path.GetFileName(pcc.FilePath)}.");
+            PSA psa = PSA.CreateFrom(ObjectBinary.From<AnimSequence>(export));
+            var frame = new Dictionary<string, (Quaternion, Vector3)>(StringComparer.OrdinalIgnoreCase);
+            for (int b = 0; b < psa.Bones.Count; b++)
+            {
+                PSA.PSAAnimKeys key = psa.Keys[psa.Infos[0].FirstRawFrame * psa.Bones.Count + b];
+                frame[psa.Bones[b].Name] = (UnrealSpace.Rotation(FromPsa(key.Rotation)), UnrealSpace.Position(FromPsa(key.Position)));
+            }
+            return frame;
+        }
     }
 
     // The bones whose translation the clip drives, from its BioAnimSetData; null (all bones)
