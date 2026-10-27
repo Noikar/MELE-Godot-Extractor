@@ -462,17 +462,33 @@ public class TextureCache
         return false;
     }
 
+    // A shader map's default textures: Indices are entries of Package. A static permutation's
+    // list belongs to the instance's package, not its base material's; resolved against the
+    // base's (BIOC_Materials for the APL master material), the props' OpacityMask default
+    // came back empty and sampled black, and their cutouts discarded every pixel.
+    private sealed record Defaults(int[] Indices, IMEPackage Package)
+    {
+        public static Defaults Of(ExportEntry baseMaterial) =>
+            new(ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures, baseMaterial.FileRef);
+
+        // The entry at a texture index, as the package names it (an import stays an import).
+        public IEntry Entry(int index) => index < Indices.Length ? Package.GetEntry(Indices[index]) : null;
+
+        // The texture at a texture index: the package's own, or the shared package's an import names.
+        public ExportEntry Texture(int index) => index < Indices.Length ? TextureCache.Resolve(Package, Indices[index]) : null;
+    }
+
     // The texture behind a shader texture slot: a material instance's value for a texture
     // parameter, or else the material's own texture (from defaults, the shader map's list, when
     // given). Null for render targets and textures stored in another package.
     private ExportEntry TextureFor(MaterialUniformExpressionTexture expression, ExportEntry baseMaterial, Dictionary<string, ExportEntry> textures,
-        int[] defaults = null)
+        Defaults defaults = null)
     {
         if (expression is MaterialUniformExpressionTextureParameter parameter
             && textures.TryGetValue(parameter.ParameterName.Instanced, out ExportEntry overridden))
             return overridden;
-        defaults ??= ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
-        return expression.TextureIndex < defaults.Length && Resolve(baseMaterial.FileRef, defaults[expression.TextureIndex]) is ExportEntry texture
+        defaults ??= Defaults.Of(baseMaterial);
+        return defaults.Texture(expression.TextureIndex) is ExportEntry texture
             && texture.ClassName is "Texture2D" or "TextureFlipBook" ? texture : null;
     }
 
@@ -547,8 +563,13 @@ public class TextureCache
     {
         ShaderCache cache = SharedShaders ? ShaderAnalysis.CacheWithShared(_pcc) : ShaderAnalysis.CacheOf(_pcc);
         string staticNote = null;
-        int[] defaults = null;
-        MaterialShaderMap map = cache != null ? ShaderAnalysis.ShaderMapOf(cache, material, baseMaterial, out defaults, out staticNote) : null;
+        Defaults defaults = null;
+        MaterialShaderMap map = null;
+        if (cache != null)
+        {
+            map = ShaderAnalysis.ShaderMapOf(cache, material, baseMaterial, out int[] indices, out IMEPackage package, out staticNote);
+            defaults = new Defaults(indices, package);
+        }
         if (map == null)
             return ", no shader to translate";
 
@@ -734,11 +755,10 @@ public class TextureCache
     // ticks it: FrameRate frames a second through HorizontalImages x VerticalImages, looping, in
     // the order FBMethod gives (rows or columns, from one of the four corners). Null when the
     // slot's texture isn't a flipbook.
-    private string FlipBookOffset(MaterialUniformExpressionTexture expression, ExportEntry baseMaterial, int[] defaults)
+    private string FlipBookOffset(MaterialUniformExpressionTexture expression, ExportEntry baseMaterial, Defaults defaults)
     {
-        defaults ??= ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
-        if (expression.TextureIndex >= defaults.Length || Resolve(baseMaterial.FileRef, defaults[expression.TextureIndex]) is not ExportEntry book
-            || book.ClassName != "TextureFlipBook")
+        defaults ??= Defaults.Of(baseMaterial);
+        if (defaults.Texture(expression.TextureIndex) is not ExportEntry book || book.ClassName != "TextureFlipBook")
             return null;
         var props = book.GetProperties();
         int columns = Math.Max(props.GetProp<IntProperty>("HorizontalImages")?.Value ?? 1, 1);
@@ -772,26 +792,24 @@ public class TextureCache
 
     // Whether a shader texture slot holds a render target (a realtime reflection's).
     private bool IsRenderTarget(MaterialUniformExpressionTexture expression, ExportEntry baseMaterial, Dictionary<string, ExportEntry> textures,
-        int[] defaults = null)
+        Defaults defaults = null)
     {
         if (expression is MaterialUniformExpressionTextureParameter parameter
             && textures.TryGetValue(parameter.ParameterName.Instanced, out ExportEntry overridden))
             return overridden.ClassName.Contains("RenderTarget");
-        defaults ??= ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
-        return expression.TextureIndex < defaults.Length && _pcc.GetEntry(defaults[expression.TextureIndex]) is IEntry texture
-            && texture.ClassName.Contains("RenderTarget");
+        defaults ??= Defaults.Of(baseMaterial);
+        return defaults.Entry(expression.TextureIndex) is IEntry texture && texture.ClassName.Contains("RenderTarget");
     }
 
     // The cubemap behind a shader cube slot, like TextureFor.
     private ExportEntry CubeFor(MaterialUniformExpressionTexture expression, ExportEntry baseMaterial, Dictionary<string, ExportEntry> textures,
-        int[] defaults = null)
+        Defaults defaults = null)
     {
         if (expression is MaterialUniformExpressionTextureParameter parameter
             && textures.TryGetValue(parameter.ParameterName.Instanced, out ExportEntry overridden))
             return overridden.ClassName == "TextureCube" ? overridden : null;
-        defaults ??= ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
-        return expression.TextureIndex < defaults.Length && _pcc.TryGetUExport(defaults[expression.TextureIndex], out ExportEntry texture)
-            && texture.ClassName == "TextureCube" ? texture : null;
+        defaults ??= Defaults.Of(baseMaterial);
+        return defaults.Texture(expression.TextureIndex) is ExportEntry texture && texture.ClassName == "TextureCube" ? texture : null;
     }
 
     // A cubemap's six faces in Direct3D order (+X, -X, +Y, -Y, +Z, -Z), or null.

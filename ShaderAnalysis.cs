@@ -40,10 +40,13 @@ public static class ShaderAnalysis
     // (bHasStaticPermutationResource) has a compiled permutation of its own, keyed by its static
     // parameters (Volumetric_1SIDED_MM has four: with or without the density texture and the
     // far fade); anything else draws with its base material's map. textures is the map's
-    // default textures by slot (a permutation keeps its own list), and staticNote names the
-    // switches that are on when the instance's own permutation was found.
+    // default textures by slot (a permutation keeps its own list), as entries of
+    // texturesPackage: the instance's package for its own list, the base material's otherwise
+    // (another package when the base is a shared one's, as the APL master material is in
+    // BIOC_Materials). staticNote names the switches that are on when the instance's own
+    // permutation was found.
     public static MaterialShaderMap ShaderMapOf(ShaderCache cache, ExportEntry material, ExportEntry baseMaterial,
-        out int[] textures, out string staticNote)
+        out int[] textures, out IMEPackage texturesPackage, out string staticNote)
     {
         staticNote = null;
         for (ExportEntry current = material; current != null && current.ClassName.StartsWith("MaterialInstance");)
@@ -57,6 +60,7 @@ public static class ShaderAnalysis
                 if (own != null)
                 {
                     textures = instance.SM3StaticPermutationResource.UniformExpressionTextures;
+                    texturesPackage = current.FileRef;
                     string[] on = set.StaticSwitchParameters.Where(s => s.Value).Select(s => s.ParameterName.Instanced).ToArray();
                     staticNote = "static switches: " + (on.Length > 0 ? string.Join(", ", on) : "all off");
                     return own;
@@ -68,6 +72,7 @@ public static class ShaderAnalysis
         }
         MaterialResource resource = ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource;
         textures = resource.UniformExpressionTextures;
+        texturesPackage = baseMaterial.FileRef;
         return cache.MaterialShaderMaps.Values.FirstOrDefault(m => m.StaticParameters.BaseMaterialId == resource.ID);
     }
 
