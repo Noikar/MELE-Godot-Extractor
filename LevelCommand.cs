@@ -266,6 +266,7 @@ public partial class LevelBuilder
         var trimeshPrimitive = trimesh.UsePrimitive(_collisionMaterial);
         int instancesBefore = _instances, lightsBefore = _lightCount, hullsBefore = _hullCount, trisBefore = _trimeshTriangles;
         _receivers.Clear();
+        _movers = FindMovers(pcc);
         // Decals go last: they draw on their receivers, which may come later in the actor list.
         var decals = new List<(ExportEntry Actor, ExportEntry Component)>();
 
@@ -851,10 +852,13 @@ public partial class LevelBuilder
             || componentProps.GetProp<BoolProperty>("HiddenGame")?.Value == true
             || actor.ClassName == "BioLedgeMeshActor"
             || meshExport.InstancedFullPath == "biog_apl_invisible_p.Invisible";
+        JsonObject mover = MoverExtras(actor, actorProps, UnrealTransform.ComponentToActor(componentProps));
         if (!hidden)
-            AddRenderInstance(pcc, actor, component, componentProps, meshExport, geometry, world, packageNode, textures);
+            AddRenderInstance(pcc, actor, component, componentProps, meshExport, geometry, world, packageNode, textures,
+                mover: mover);
 
-        if (!BlocksPlayer(actorProps, componentProps))
+        // A mover's collision would stay at its start (LevelMovers.cs).
+        if (mover != null || !BlocksPlayer(actorProps, componentProps))
             return;
         if (geometry.Hulls != null)
         {
@@ -889,7 +893,7 @@ public partial class LevelBuilder
     // Both are stored quantized; scale0 and scale1 (the light-map scales) bring them back.
     private void AddRenderInstance(IMEPackage pcc, ExportEntry actor, ExportEntry component, PropertyCollection componentProps,
         ExportEntry meshExport, MeshGeometry geometry, Matrix4x4 world, NodeBuilder packageNode, TextureCache textures,
-        string nodeName = null)
+        string nodeName = null, JsonObject mover = null)
     {
         // The component's material overrides, per element.
         int[] overrides = componentProps.GetProp<ArrayProperty<ObjectProperty>>("Materials")?.Select(o => o.Value).ToArray() ?? [];
@@ -942,6 +946,8 @@ public partial class LevelBuilder
         var extras = new JsonObject { ["me_lightmap"] = lighting };
         if (!geometry.LightmapInRange)
             extras["lightmap_uv"] = false;
+        if (mover != null)
+            extras["me_mover"] = mover;
         var node = new NodeBuilder(nodeName ?? actor.ObjectName.Instanced, extras);
         packageNode.AddNode(node);
         node.LocalMatrix = UnrealTransform.ToGltf(world);
@@ -1628,6 +1634,8 @@ public partial class LevelBuilder
         Console.WriteLine($"Skeletal placeables: {_skeletalPlaceables} from {_skeletalAssets.Count} models, "
             + $"{_sounds.Values.Count(v => v != null)} of {_sounds.Count} sounds to {_soundsDir}.");
         Console.WriteLine($"Placeable effects: {_effects}.");
+        if (_moverCount > 0)
+            Console.WriteLine($"Movers (looping matinees from level load): {_moverCount}.");
         Console.WriteLine($"Ambient sounds: {_ambientSounds} ({_ambientMusic} music); music volumes: {_musicVolumeCount}; stream volumes: {_streamVolumeCount}.");
         if (_pawnsNode != null)
         {

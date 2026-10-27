@@ -92,6 +92,12 @@ public static class ShaderAnalysis
         }
         Guid id = ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.ID;
         MaterialShaderMap map = cache.MaterialShaderMaps.Values.FirstOrDefault(m => m.StaticParameters.BaseMaterialId == id);
+        // A shared package's material isn't in the level's own cache (see RefCacheOf).
+        if (map == null && sharedCache && RefCacheOf(pcc) is ShaderCache shared && shared != cache)
+        {
+            cache = shared;
+            map = cache.MaterialShaderMaps.Values.FirstOrDefault(m => m.StaticParameters.BaseMaterialId == id);
+        }
         if (map == null)
         {
             failure = "no shader map";
@@ -127,10 +133,15 @@ public static class ShaderAnalysis
     // The package's own cache, else the game's RefShaderCache (static-mesh shaders only). ME3's
     // and ME2's seek-free packages (powers' effects) carry no shaders of their own; the game
     // finds them in RefShaderCache (ME3: 1.3 GB, read in about 3 s, about 2.7 GB at its peak).
-    internal static ShaderCache CacheWithShared(IMEPackage pcc) =>
-        CacheOf(pcc) ?? (pcc.FilePath != null
-            ? CacheOfFile(Path.Combine(Path.GetDirectoryName(pcc.FilePath)!, RefShaderCache), "FLocalVertexFactory")
-            : null);
+    internal static ShaderCache CacheWithShared(IMEPackage pcc) => CacheOf(pcc) ?? RefCacheOf(pcc);
+
+    // The game's RefShaderCache beside a package, static-mesh shaders only. ME1's levels have a
+    // cache of their own, but it leaves out materials that live in a shared package: the
+    // placeable holograms' Holomod_* instances parent to BIOC_Materials' Blank, whose shaders are
+    // only here. Without them the Keepers' orange holograms drew as plain white additive.
+    internal static ShaderCache RefCacheOf(IMEPackage pcc) => pcc.FilePath != null
+        ? CacheOfFile(Path.Combine(Path.GetDirectoryName(pcc.FilePath)!, RefShaderCache), "FLocalVertexFactory")
+        : null;
 
     internal const string RefShaderCache = "RefShaderCache-PC-D3D-SM5.upk";
 

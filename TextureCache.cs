@@ -571,6 +571,13 @@ public class TextureCache
             map = ShaderAnalysis.ShaderMapOf(cache, material, baseMaterial, out int[] indices, out IMEPackage package, out staticNote);
             defaults = new Defaults(indices, package);
         }
+        // A shared package's material isn't in the level's own cache (ShaderAnalysis.RefCacheOf).
+        if (map == null && SharedShaders && ShaderAnalysis.RefCacheOf(_pcc) is ShaderCache shared && shared != cache)
+        {
+            cache = shared;
+            map = ShaderAnalysis.ShaderMapOf(cache, material, baseMaterial, out int[] indices, out IMEPackage package, out staticNote);
+            defaults = new Defaults(indices, package);
+        }
         if (map == null)
             return ", no shader to translate";
 
