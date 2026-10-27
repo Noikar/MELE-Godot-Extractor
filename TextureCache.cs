@@ -4,6 +4,7 @@ using LegendaryExplorerCore.Packages;
 using System.Text.RegularExpressions;
 using LegendaryExplorerCore.Unreal;
 using LegendaryExplorerCore.Unreal.BinaryConverters;
+using LegendaryExplorerCore.Unreal.BinaryConverters.Shaders;
 using LegendaryExplorerCore.Unreal.Classes;
 using Texture2D = LegendaryExplorerCore.Unreal.Classes.Texture2D;
 using SharpGLTF.Materials;

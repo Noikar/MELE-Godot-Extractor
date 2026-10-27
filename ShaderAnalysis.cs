@@ -4,7 +4,9 @@ using System.Text.RegularExpressions;
 using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
 using LegendaryExplorerCore.Unreal.BinaryConverters;
+using LegendaryExplorerCore.Unreal.BinaryConverters.Shaders;
 using LegendaryExplorerCore.Unreal.Collections;
+using EFoldedMathOperation = LegendaryExplorerCore.Unreal.BinaryConverters.MaterialUniformExpressionFoldedMath.EFoldedMathOperation;
 
 namespace LexExport;
 
@@ -208,11 +210,11 @@ public static class ShaderAnalysis
         switch (expression)
         {
             case MaterialUniformExpressionConstant c:
-                return [c.R, c.G, c.B, c.A];
+                return [c.Value.R, c.Value.G, c.Value.B, c.Value.A];
             case MaterialUniformExpressionVectorParameter v:
                 if (v.ParameterName.Instanced == "SelectionColor")
                     return [0, 0, 0, 0];
-                return parameters(v.ParameterName.Instanced) ?? [v.DefaultR, v.DefaultG, v.DefaultB, v.DefaultA];
+                return parameters(v.ParameterName.Instanced) ?? [v.DefaultValue.R, v.DefaultValue.G, v.DefaultValue.B, v.DefaultValue.A];
             case MaterialUniformExpressionScalarParameter s:
                 return parameters(s.ParameterName.Instanced) ?? [s.DefaultValue];
             case MaterialUniformExpression time when IsTime(time):
@@ -229,13 +231,13 @@ public static class ShaderAnalysis
                 if (a == null || b == null)
                     return null;
                 // FMO_Add, FMO_Sub, FMO_Mul, FMO_Div, FMO_Dot; a single value applies to every component.
-                if (math.Op == 4)
+                if (math.Op == EFoldedMathOperation.Dot)
                     return [Enumerable.Range(0, Math.Min(a.Length, b.Length)).Sum(i => a[i] * b[i])];
                 return Enumerable.Range(0, Math.Max(a.Length, b.Length)).Select(i => math.Op switch
                 {
-                    0 => At(a, i) + At(b, i),
-                    1 => At(a, i) - At(b, i),
-                    2 => At(a, i) * At(b, i),
+                    EFoldedMathOperation.Add => At(a, i) + At(b, i),
+                    EFoldedMathOperation.Sub => At(a, i) - At(b, i),
+                    EFoldedMathOperation.Mul => At(a, i) * At(b, i),
                     _ => At(b, i) != 0 ? At(a, i) / At(b, i) : 0,
                 }).ToArray();
             }
@@ -294,9 +296,9 @@ public static class ShaderAnalysis
                 string[] a = Of(math.A), b = Of(math.B);
                 if (a == null || b == null)
                     return null;
-                if (math.Op == 4)
+                if (math.Op == EFoldedMathOperation.Dot)
                     return [string.Join(" + ", Enumerable.Range(0, Math.Min(a.Length, b.Length)).Select(i => $"{a[i]} * {b[i]}"))];
-                string op = math.Op switch { 0 => "+", 1 => "-", 2 => "*", _ => "/" };
+                string op = math.Op switch { EFoldedMathOperation.Add => "+", EFoldedMathOperation.Sub => "-", EFoldedMathOperation.Mul => "*", _ => "/" };
                 return Enumerable.Range(0, Math.Max(a.Length, b.Length)).Select(i => $"({Get(a, i)} {op} {Get(b, i)})").ToArray();
             }
             case MaterialUniformExpressionClamp clamp:

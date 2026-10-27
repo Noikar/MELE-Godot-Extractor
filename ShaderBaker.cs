@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
 using LegendaryExplorerCore.Unreal.BinaryConverters;
+using LegendaryExplorerCore.Unreal.BinaryConverters.Shaders;
 using SharpGLTF.Memory;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.PixelFormats;

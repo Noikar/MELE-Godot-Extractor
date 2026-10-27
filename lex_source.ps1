@@ -2,8 +2,9 @@
 # into the published extractor's source/ folder.
 #
 # The tag is read from LegendaryExplorerCore.dll itself: LEX tags every release with its file
-# version (6.4.1.6065), so the zip always matches the DLLs actually shipped. A LEX build with no
-# matching tag (a nightly, a local build) fails the publish instead of shipping mismatched source.
+# version (6.5.0.0 for the 6.5.0.6522 release, which has both tags), so the zip always matches the
+# DLLs actually shipped. A LEX build with no matching tag (a nightly, a local build) fails the
+# publish instead of shipping mismatched source.
 #
 # Only the projects behind the shipped binaries are fetched (a sparse, blobless clone; the full
 # repository is ~470 MB): LegendaryExplorerCore, TexConverter, LEX's license notices, and the

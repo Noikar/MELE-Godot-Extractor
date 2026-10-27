@@ -16,7 +16,7 @@ public static class ScriptCommand
         LegendaryExplorerCoreLibSettings.Instance.LEDirectory = Program.GameRoot;
         IMEPackage pcc = MEPackageHandler.OpenMEPackage(Program.ResolvePackage(packagePath));
         using var lib = new FileLib(pcc);
-        if (!lib.Initialize(null, null, false))
+        if (!lib.Initialize(new UnrealScriptOptionsPackage(), false))
             Console.Error.WriteLine("script: the script library didn't initialize; names from other packages may be missing.");
         int printed = 0;
         foreach (ExportEntry export in pcc.Exports)

@@ -56,7 +56,7 @@ public static class WwiseExport
     // Every bank, WEM, and stream of a set of packages, merged (HIRC and media ids are global).
     private sealed class Library
     {
-        public readonly Dictionary<uint, WwiseBank.HIRCObject> Objects = [];
+        public readonly Dictionary<uint, WwiseBankParsed.HIRCObject> Objects = [];
         public readonly Dictionary<uint, Node> Nodes = [];
         public readonly Dictionary<uint, List<uint>> Children = [];
         public readonly Dictionary<uint, byte[]> Media = [];
@@ -146,14 +146,14 @@ public static class WwiseExport
         {
             uint id = EventId(e);
             Console.WriteLine($"{e.InstancedFullPath} (HIRC {id})");
-            if (library.Objects.GetValueOrDefault(id) is not WwiseBank.Event wevent)
+            if (library.Objects.GetValueOrDefault(id) is not WwiseBankParsed.Event wevent)
             {
                 Console.WriteLine("  not in any loaded bank");
                 continue;
             }
             foreach (uint actionId in wevent.EventActions)
             {
-                if (library.Objects.GetValueOrDefault(actionId) is WwiseBank.EventAction action)
+                if (library.Objects.GetValueOrDefault(actionId) is WwiseBankParsed.EventAction action)
                 {
                     Console.WriteLine($"  action {action.ActionType} -> {action.ReferencedObjectID}");
                     PrintNode(library, action.ReferencedObjectID, "    ", packagePath);
@@ -196,13 +196,13 @@ public static class WwiseExport
     private static List<Layer> Layers(Library library, uint eventId)
     {
         var layers = new List<Layer>();
-        if (library.Objects.GetValueOrDefault(eventId) is not WwiseBank.Event wevent)
+        if (library.Objects.GetValueOrDefault(eventId) is not WwiseBankParsed.Event wevent)
             return layers;
         foreach (uint actionId in wevent.EventActions)
         {
-            if (library.Objects.GetValueOrDefault(actionId) is not WwiseBank.EventAction action)
+            if (library.Objects.GetValueOrDefault(actionId) is not WwiseBankParsed.EventAction action)
                 continue;
-            if (action.ActionType is not (WwiseBank.EventActionType.Play or WwiseBank.EventActionType.Play_LE))
+            if (action.ActionType is not (WwiseBankParsed.EventActionType.Play or WwiseBankParsed.EventActionType.Play_LE))
                 continue;
             if (!library.Nodes.TryGetValue(action.ReferencedObjectID, out Node target))
                 continue;
@@ -326,7 +326,11 @@ public static class WwiseExport
             {
                 if (export.ClassName == "WwiseBank")
                 {
-                    WwiseBank bank = ObjectBinary.From<WwiseBank>(export);
+                    // LEX 6.5's parser reads past the end of an empty bank (6.4.1 skipped them),
+                    // so check the raw bytes first.
+                    if (ObjectBinary.From<WwiseBank>(export).BnkFile is not { Length: > 0 })
+                        continue;
+                    WwiseBankParsed bank = ObjectBinary.From<WwiseBankParsed>(export);
                     foreach (var media in bank.EmbeddedFiles)
                         library.Media.TryAdd(media.Key, media.Value);
                     foreach (var hirc in bank.HIRCObjects)
@@ -339,7 +343,7 @@ public static class WwiseExport
                 }
             }
         }
-        foreach (WwiseBank.HIRCObject hirc in library.Objects.Values)
+        foreach (WwiseBankParsed.HIRCObject hirc in library.Objects.Values)
         {
             if (hirc.Type == HIRCType.Attenuation)
             {
@@ -366,7 +370,7 @@ public static class WwiseExport
         return library;
     }
 
-    private static Node ParseNode(WwiseBank.HIRCObject hirc)
+    private static Node ParseNode(WwiseBankParsed.HIRCObject hirc)
     {
         bool sound = hirc.Type == HIRCType.SoundSXFSoundVoice;
         if (!sound && hirc.Type is not (HIRCType.RandomOrSequenceContainer or HIRCType.BlendContainer

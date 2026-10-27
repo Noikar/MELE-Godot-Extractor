@@ -2,6 +2,7 @@ using System.Text;
 using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
 using LegendaryExplorerCore.Unreal.BinaryConverters;
+using LegendaryExplorerCore.Unreal.BinaryConverters.Shaders;
 
 namespace LexExport;
 
@@ -158,9 +159,9 @@ public static class ShadersCommand
     private static string Expression(MaterialUniformExpression x) => x switch
     {
         MaterialUniformExpressionTextureParameter t => $"TextureParam {t.ParameterName.Instanced}",
-        MaterialUniformExpressionVectorParameter v => $"VectorParam {v.ParameterName.Instanced} default ({v.DefaultR}, {v.DefaultG}, {v.DefaultB}, {v.DefaultA})",
+        MaterialUniformExpressionVectorParameter v => $"VectorParam {v.ParameterName.Instanced} default ({v.DefaultValue.R}, {v.DefaultValue.G}, {v.DefaultValue.B}, {v.DefaultValue.A})",
         MaterialUniformExpressionScalarParameter s => $"ScalarParam {s.ParameterName.Instanced} default {s.DefaultValue}",
-        MaterialUniformExpressionConstant c => $"Const ({c.R}, {c.G}, {c.B}, {c.A})",
+        MaterialUniformExpressionConstant c => $"Const ({c.Value.R}, {c.Value.G}, {c.Value.B}, {c.Value.A})",
         MaterialUniformExpressionFoldedMath f => $"{f.Op} [{Expression(f.A)}] [{Expression(f.B)}]",
         _ => x.ExpressionType.Instanced,
     };

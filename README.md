@@ -37,7 +37,7 @@ You need:
 - Windows, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
 - Mass Effect Legendary Edition (Steam or EA app)
 - A [Legendary Explorer](https://github.com/ME3Tweaks/LegendaryExplorer/releases) release,
-  extracted to a folder. The tool is built and tested against **6.4.1.6065**.
+  extracted to a folder. The tool is built and tested against **6.5.0.6522** (its DLLs report file version 6.5.0.0).
 
 ```
 dotnet build -c Release -p:LexDir="C:\path\to\Legendary Explorer"
