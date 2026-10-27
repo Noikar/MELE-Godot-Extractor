@@ -44,6 +44,7 @@ public static class AnimationBaker
 
         int[] jointOf = psa.Bones.Select(b => skeleton.Contains(b.Name) ? skeleton.IndexOf(b.Name) : -1).ToArray();
         int skipped = jointOf.Count(j => j < 0);
+        TrackKeys keys = TrackKeys.Of(sequence, psa, frames);
 
         // The root bone's horizontal travel is root motion. For a character the server moves,
         // keep the clip in place and let the controller supply the movement.
@@ -68,12 +69,11 @@ public static class AnimationBaker
             var rotations = new Quaternion[frames];
             for (int f = 0; f < frames; f++)
             {
-                PSA.PSAAnimKeys key = psa.Keys[(info.FirstRawFrame + f) * boneCount + b];
-                Vector3 pos = FromPsa(key.Position);
+                Vector3 pos = FromPsa(keys.Position(psa, info, b, f));
                 if (inPlace && b == rootBone)
                     pos = new Vector3(firstPos.X, firstPos.Y, pos.Z);
                 positions[f] = useTranslation ? UnrealSpace.Position(pos) : bind.Translation;
-                rotations[f] = holdBind ? bind.Rotation : UnrealSpace.Rotation(FromPsa(key.Rotation));
+                rotations[f] = holdBind ? bind.Rotation : UnrealSpace.Rotation(FromPsa(keys.Rotation(psa, info, b, f)));
                 if (added)
                 {
                     rotations[f] = Quaternion.Normalize(delta.Rotation * rotations[f]);
@@ -106,11 +106,89 @@ public static class AnimationBaker
             speed = new Vector2(end.X - start.X, end.Y - start.Y).Length() * UnrealSpace.UnitsToMeters / ((frames - 1) / rate);
         }
 
+        string spreadNote = keys.Spread > 0 ? $", {keys.Spread} tracks with fewer keys spread over the clip" : "";
         string addedNote = additive == null ? ""
             : $", plus {additive.Name} on {additive.Deltas.Keys.Count(bone => psa.Bones.Any(p => p.Name.Equals(bone, StringComparison.OrdinalIgnoreCase)))}/{additive.Deltas.Count} of its moving bones";
         Console.WriteLine($"  anim {clipName}: {frames} frames @ {rate:F0} fps ({frames / rate:F2} s), "
-            + $"{boneCount - skipped}/{boneCount} tracks mapped{(bindBones?.Count > 0 ? $", held at bind: {string.Join(", ", bindBones)}" : "")}{addedNote}, root speed {speed:F2} m/s{(inPlace ? " (removed, in place)" : "")}.");
+            + $"{boneCount - skipped}/{boneCount} tracks mapped{(bindBones?.Count > 0 ? $", held at bind: {string.Join(", ", bindBones)}" : "")}{spreadNote}{addedNote}, root speed {speed:F2} m/s{(inPlace ? " (removed, in place)" : "")}.");
         return boneCount - skipped;
+    }
+
+    // Where each track's keys fall in the clip. LEX's PSA lays a track's keys out as consecutive
+    // frames and holds its last one, but a compressed track can carry fewer keys than the clip has
+    // frames (ME1's HMM_CB_Pistol_CB_WalkSouth: 17 over 33, every other frame dropped), which froze
+    // the second half of the clip. UE3 spreads such keys evenly over the clip (AnimEncoding's
+    // KeyPos = RelativePos * (NumKeys - 1)), so they're sampled that way, between neighboring keys.
+    private sealed class TrackKeys
+    {
+        private readonly int[] _positions;
+        private readonly int[] _rotations;
+        private readonly int _frames;
+        private readonly int _boneCount;
+
+        // How many tracks have fewer keys than frames (for the log).
+        public int Spread { get; }
+
+        private TrackKeys(int[] positions, int[] rotations, int frames, int boneCount)
+        {
+            _positions = positions;
+            _rotations = rotations;
+            _frames = frames;
+            _boneCount = boneCount;
+            Spread = Enumerable.Range(0, boneCount).Count(b => (positions[b] > 1 && positions[b] < frames) || (rotations[b] > 1 && rotations[b] < frames));
+        }
+
+        // The key counts of the sequence's tracks, when they line up with the PSA's bones; every
+        // track counts as fully keyed otherwise (LEX's layout, as before).
+        public static TrackKeys Of(AnimSequence sequence, PSA psa, int frames)
+        {
+            int boneCount = psa.Bones.Count;
+            var positions = Enumerable.Repeat(frames, boneCount).ToArray();
+            var rotations = Enumerable.Repeat(frames, boneCount).ToArray();
+            List<AnimTrack> tracks = sequence.RawAnimationData;
+            bool sameOrder = tracks != null && tracks.Count == boneCount && sequence.Bones != null
+                && sequence.Bones.Count == boneCount
+                && Enumerable.Range(0, boneCount).All(b => string.Equals(sequence.Bones[b], psa.Bones[b].Name, StringComparison.OrdinalIgnoreCase));
+            if (sameOrder)
+            {
+                for (int b = 0; b < boneCount; b++)
+                {
+                    positions[b] = Math.Clamp(tracks[b].Positions?.Count ?? frames, 1, frames);
+                    rotations[b] = Math.Clamp(tracks[b].Rotations?.Count ?? frames, 1, frames);
+                }
+            }
+            return new TrackKeys(positions, rotations, frames, boneCount);
+        }
+
+        public Vector3 Position(PSA psa, PSA.PSAAnimInfo info, int bone, int frame)
+        {
+            (int first, int second, float t) = Between(_positions[bone], frame);
+            Vector3 a = psa.Keys[(info.FirstRawFrame + first) * _boneCount + bone].Position;
+            if (t == 0f)
+                return a;
+            return Vector3.Lerp(a, psa.Keys[(info.FirstRawFrame + second) * _boneCount + bone].Position, t);
+        }
+
+        public Quaternion Rotation(PSA psa, PSA.PSAAnimInfo info, int bone, int frame)
+        {
+            (int first, int second, float t) = Between(_rotations[bone], frame);
+            Quaternion a = psa.Keys[(info.FirstRawFrame + first) * _boneCount + bone].Rotation;
+            if (t == 0f)
+                return a;
+            return Quaternion.Normalize(Quaternion.Slerp(a, psa.Keys[(info.FirstRawFrame + second) * _boneCount + bone].Rotation, t));
+        }
+
+        // The two keys around a frame and how far it is from the first toward the second.
+        private (int First, int Second, float T) Between(int keyCount, int frame)
+        {
+            if (keyCount >= _frames)
+                return (frame, frame, 0f);
+            if (keyCount <= 1 || _frames <= 1)
+                return (0, 0, 0f);
+            float at = frame * (keyCount - 1f) / (_frames - 1f);
+            int first = Math.Min((int)MathF.Floor(at), keyCount - 1);
+            return (first, Math.Min(first + 1, keyCount - 1), at - first);
+        }
     }
 
     // A held pose's per-bone difference from a base pose (both read at their first frame, in glTF
