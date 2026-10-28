@@ -47,7 +47,7 @@ public partial class LevelBuilder
 
     // Part of every look's hash: bump it when an exporter change alters looks, so players'
     // games bake them again.
-    private const int LookVersion = 1;
+    private const int LookVersion = 2;
 
     private readonly List<string> _pawnPatterns = new();
     private NodeBuilder _pawnsNode;
@@ -248,7 +248,7 @@ public partial class LevelBuilder
             // morph face's head replaces at load.
             if (look.Morph != null && !look.Morphed && (component == headComponent || look.Morph.m_oBaseHead?.InstancedFullPath == meshExport.InstancedFullPath))
             {
-                mesh = look.Morph.Apply();
+                mesh = MorphFace.Apply(look.Morph);
                 look.Morphed = true;
             }
             else
@@ -272,6 +272,13 @@ public partial class LevelBuilder
         {
             look.Parts.Add((look.Morph.m_oHairMesh.ObjectName.Instanced, look.Morph.HairMesh));
             key.Append("|hair:").Append(look.Morph.m_oHairMesh.InstancedFullPath);
+        }
+        // Every part with face bones (a pawn's own hair too) takes the morph's, so the merged
+        // skeleton holds them whichever part comes first.
+        if (look.Morph != null)
+        {
+            foreach (var (_, mesh) in look.Parts)
+                MorphFace.ApplyBoneOffsets(mesh, look.Morph.BoneOffsets);
         }
         // The overrides tint the bake too (the face's rides on its path).
         key.Append("|type:").Append(look.TypeOverride != null ? OverrideSignature(pcc, look.TypeOverride) : "-");
@@ -383,8 +390,7 @@ public partial class LevelBuilder
         var scene = new SceneBuilder();
         scene.AddNode(assetNode);
 
-        // Eyelash cards' materials live in another package and would draw as opaque flaps.
-        var textures = new TextureCache(pcc, ["Lash"]) { BakeShaders = true, MaxTextureSize = PawnTextureSize };
+        var textures = new TextureCache(pcc, []) { BakeShaders = true, ResolveImports = true, MaxTextureSize = PawnTextureSize };
         if (look.FaceOverride != null)
             textures.AddOverrides(look.FaceOverride);
         if (look.TypeOverride != null)

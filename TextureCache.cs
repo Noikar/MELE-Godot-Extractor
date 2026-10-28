@@ -54,6 +54,11 @@ public class TextureCache
     // distortion pass.
     public bool SharedShaders { get; init; }
 
+    // Characters and NPC looks: a material (or parent) imported from another package resolves,
+    // as the game loads it (Own: the eyelash instances in BIOG_HMM_HED_PROMorph.pcc, their
+    // master in BIOC_Materials). Levels keep to their own package.
+    public bool ResolveImports { get; init; }
+
     private ShaderTranslator.Policy[] UnlitPolicies => SharedShaders
         ? [ShaderTranslator.Policy.Unlit, ShaderTranslator.Policy.Distortion]
         : [ShaderTranslator.Policy.Unlit];
@@ -123,7 +128,7 @@ public class TextureCache
     // materialUIndex is the SkeletalMesh's material reference for a section; fallbackName names
     // the material when that reference can't be resolved (e.g. it points at another package).
     public MaterialBuilder MaterialFor(int materialUIndex, string fallbackName) =>
-        MaterialFor(materialUIndex != 0 && _pcc.TryGetUExport(materialUIndex, out ExportEntry e) ? e : null, fallbackName);
+        MaterialFor(materialUIndex != 0 ? Own(_pcc, materialUIndex) : null, fallbackName);
 
     // The same for a material export of any package (an effect's, imported from SFXGame).
     public MaterialBuilder MaterialFor(ExportEntry material, string fallbackName)
@@ -160,6 +165,26 @@ public class TextureCache
                 : "";
             _materials[key] = VolumetricMaterial(builder, colors, scalars, translated);
             return _materials[key];
+        }
+
+        // Eyelash cards. Their master (HMN_HED_LASH_Unlit_MASTER_MAT, in BIOC_Materials) is unlit
+        // and alpha-blended, which skinned bakes don't carry: its color is HED_Lash_Diff_Vector
+        // (black by default, and no instance sets it) through the HED_Lash_Diff opacity mask,
+        // scaled by HED_Lash_Opac_Scalar.
+        if (baseMaterial?.ObjectName.Instanced == "HMN_HED_LASH_Unlit_MASTER_MAT"
+            && LashMask(material, baseMaterial) is ExportEntry lashMask
+            && MaterialBaker.Pixels.Load(lashMask) is MaterialBaker.Pixels lash)
+        {
+            // A centimeter-wide card: 512 px is plenty.
+            while (lash.Width > 512)
+                lash = lash.Half();
+            Vector3 lashColor = colors.GetValueOrDefault("HED_Lash_Diff_Vector", Vector3.Zero);
+            float opacity = scalars.GetValueOrDefault("HED_Lash_Opac_Scalar", 1f);
+            builder.WithUnlitShader().WithDoubleSide(true).WithAlpha(AlphaMode.BLEND)
+                .WithChannelImage(KnownChannel.BaseColor, lash.Map((_, _, d) => new Vector4(lashColor, d.X * opacity)));
+            Console.WriteLine($"  material {builder.Name}: eyelashes, unlit blend of {lashMask.ObjectName.Instanced} x {opacity:0.##}");
+            _materials[key] = builder;
+            return builder;
         }
 
         // A texture override only replaces a parameter the material actually has (the face
@@ -336,7 +361,12 @@ public class TextureCache
             {
                 string name = p.GetProp<NameProperty>("ParameterName")?.Value.Instanced;
                 int uIndex = p.GetProp<ObjectProperty>("ParameterValue")?.Value ?? 0;
-                if (name != null && !textures.ContainsKey(name) && Parent(current, uIndex) is ExportEntry tex)
+                // Imported textures stay out, ResolveImports or not: resolving them changed every
+                // face bake (a krogan's tints from BIOC_Materials turned its teeth purple), which
+                // wants checking against ME1 first.
+                ExportEntry tex = SharedShaders ? Resolve(current.FileRef, uIndex)
+                    : current.FileRef.TryGetUExport(uIndex, out ExportEntry own) ? own : null;
+                if (name != null && !textures.ContainsKey(name) && tex != null)
                     textures[name] = tex;
             }
             foreach (StructProperty p in props.GetProp<ArrayProperty<StructProperty>>("VectorParameterValues") ?? Enumerable.Empty<StructProperty>())
@@ -356,15 +386,61 @@ public class TextureCache
                     scalars[name] = f.Value;
             }
             current = Parent(current, props.GetProp<ObjectProperty>("Parent")?.Value ?? 0);
+            // A ResolveImports master from the global material package decides blending and
+            // the shader; its parameter defaults stay out, as before ResolveImports.
+            if (current != null && !SharedShaders && IsGlobal(current.FileRef))
+                break;
         }
     }
+
+    // A lash instance's HED_Lash_Diff (imports included: the asari's comes from BIOC_Materials),
+    // else the master's own default texture.
+    private ExportEntry LashMask(ExportEntry material, ExportEntry master)
+    {
+        for (ExportEntry current = material; current != null && current != master;)
+        {
+            var props = current.GetProperties();
+            foreach (StructProperty p in props.GetProp<ArrayProperty<StructProperty>>("TextureParameterValues") ?? Enumerable.Empty<StructProperty>())
+            {
+                if (p.GetProp<NameProperty>("ParameterName")?.Value.Instanced == "HED_Lash_Diff"
+                    && Own(current.FileRef, p.GetProp<ObjectProperty>("ParameterValue")?.Value ?? 0) is ExportEntry texture)
+                    return texture;
+            }
+            current = Parent(current, props.GetProp<ObjectProperty>("Parent")?.Value ?? 0);
+        }
+        foreach (ObjectProperty expression in master.GetProperties().GetProp<ArrayProperty<ObjectProperty>>("Expressions") ?? Enumerable.Empty<ObjectProperty>())
+        {
+            if (master.FileRef.TryGetUExport(expression.Value, out ExportEntry sample)
+                && sample.GetProperties() is var props && props.GetProp<NameProperty>("ParameterName")?.Value.Instanced == "HED_Lash_Diff")
+                return Own(master.FileRef, props.GetProp<ObjectProperty>("Texture")?.Value ?? 0);
+        }
+        return null;
+    }
+
+    private static bool IsGlobal(IMEPackage pcc) =>
+        pcc.FilePath != null && SharedPackages.GetValueOrDefault(pcc.Game, ["BIOC_Materials.pcc"])
+            .Contains(Path.GetFileName(pcc.FilePath), StringComparer.OrdinalIgnoreCase);
 
     // What an entry's property references: an export of its own package, or with SharedShaders
     // (effects, whose instances parent to materials in SFXGame), the shared package's export an
     // import names. Levels keep to their own package.
     private ExportEntry Parent(ExportEntry from, int uIndex) =>
-        SharedShaders ? Resolve(from.FileRef, uIndex)
-        : from.FileRef.TryGetUExport(uIndex, out ExportEntry export) ? export : null;
+        SharedShaders ? Resolve(from.FileRef, uIndex) : Own(from.FileRef, uIndex);
+
+    // An export of the package, or with ResolveImports, the export an import names: in its own
+    // package's file when the game has one (inside it, the path leaves out the package's name),
+    // else in the global material package (BIOG_Humanoid_MASTER_MTR_R's masters live in
+    // BIOC_Materials).
+    private ExportEntry Own(IMEPackage pcc, int uIndex)
+    {
+        if (pcc.TryGetUExport(uIndex, out ExportEntry export))
+            return export;
+        if (!ResolveImports || pcc.GetEntry(uIndex) is not ImportEntry import || pcc.FilePath == null)
+            return null;
+        string[] path = import.InstancedFullPath.Split('.', 2);
+        IMEPackage file = path.Length == 2 ? EntryScope.OpenShared(Path.Combine(Path.GetDirectoryName(pcc.FilePath)!, path[0] + ".pcc")) : null;
+        return file?.FindExport(path[1]) ?? Resolve(pcc, uIndex);
+    }
 
     // Bakes an unlit translucent material from its compiled pixel shader (ShaderAnalysis):
     // color and opacity as a constant plus weighted texture channels. Samples at the surface's

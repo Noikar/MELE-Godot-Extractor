@@ -4,6 +4,7 @@ using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
 using LegendaryExplorerCore.Unreal.BinaryConverters;
 using BioMorphFace = LegendaryExplorerCore.Unreal.Classes.BioMorphFace;
+using BoneOffset = LegendaryExplorerCore.Unreal.Classes.BoneOffset;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
@@ -93,7 +94,7 @@ public static class MeshCommand
         using IMEPackage pcc = MEPackageHandler.OpenMEPackage(packagePath);
         var skeleton = new MergedSkeleton();
         var parts = new List<(string Name, SkeletalMesh Mesh)>();
-        var textures = new TextureCache(pcc, hidden) { BakeShaders = true };
+        var textures = new TextureCache(pcc, hidden) { BakeShaders = true, ResolveImports = true };
 
         for (int m = 0; m < meshPaths.Count; m++)
         {
@@ -104,25 +105,29 @@ public static class MeshCommand
                 for (int s = 0; s < swaps.Length && s < mesh.Materials.Length; s++)
                     mesh.Materials[s] = FindExport(pcc, swaps[s], null).UIndex;
             }
-            skeleton.Add(mesh.RefSkeleton);
             parts.Add((export.ObjectName.Instanced, mesh));
         }
 
+        var faceBones = new List<BoneOffset>();
         foreach (string morphPath in morphs)
         {
             ExportEntry export = FindExport(pcc, morphPath, "BioMorphFace");
             var morph = new BioMorphFace(export);
-            SkeletalMesh head = morph.Apply();
-            skeleton.Add(head.RefSkeleton);
-            parts.Add((morph.m_oBaseHead.ObjectName.Instanced, head));
+            parts.Add((morph.m_oBaseHead.ObjectName.Instanced, MorphFace.Apply(morph)));
+            faceBones.AddRange(morph.BoneOffsets);
             if (morph.HairMesh != null)
-            {
-                skeleton.Add(morph.HairMesh.RefSkeleton);
                 parts.Add((morph.m_oHairMesh.ObjectName.Instanced, morph.HairMesh));
-            }
             int overrides = export.GetProperties().GetProp<ObjectProperty>("m_oMaterialOverrides")?.Value ?? 0;
             if (pcc.TryGetUExport(overrides, out ExportEntry overrideExport))
                 textures.AddOverrides(overrideExport);
+        }
+
+        // Merged once every part is in, with the face bones where the morph puts them on every
+        // mesh that has them, so no part's base positions win the merge.
+        foreach (var (_, mesh) in parts)
+        {
+            MorphFace.ApplyBoneOffsets(mesh, faceBones);
+            skeleton.Add(mesh.RefSkeleton);
         }
 
 

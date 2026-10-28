@@ -338,7 +338,7 @@ public static class MaterialBaker
         }
 
         // Box-filtered half-size copy.
-        private Pixels Half()
+        internal Pixels Half()
         {
             var half = new Pixels { Width = Width / 2, Height = Height / 2 };
             half.Data = new Vector4[half.Width * half.Height];
