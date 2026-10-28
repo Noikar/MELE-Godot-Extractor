@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using LegendaryExplorerCore.Packages;
@@ -13,12 +14,14 @@ namespace LexExport;
 //   impact      CE_ImpactTemplate        where it lands
 //   target      CE_TargetCrustTemplate   on the target while the effect lasts
 // (the manifest may name a template for a role the default leaves out: Pull's lift crust is
-// only referenced from code). Each template is a module list, written as an Effects/<role>
+// only referenced from code; or, with no "power" class, name roles of its own: the omni-tool's
+// "arm" and "hand"). Each template is a module list, written as an Effects/<role>
 // node whose "me_effect" extras hold { template, modules: [...] }:
 //   emitter          a particle system ("me_particles": { system, emitters }, as a level's,
 //                    each emitter's "asset" drawn from ParticleAssets/), its tag, duration,
 //                    draw scale, and the instance parameters it sets
-//   location         the bone it attaches to (m_sAttachment) and how
+//   location         the bone it attaches to (m_sAttachment) and how, and its offset and
+//                    turn from that bone ("adjust")
 //   lifetime         how long the effect lives (cooldown: after it's told to stop)
 //   camera_shake     UE3's CameraShake: rotation (Unreal units, 65536 a turn), location (cm),
 //                    and FOV (degrees) oscillations, with ShakeScale and its radial falloff
@@ -43,10 +46,15 @@ public partial class LevelBuilder
     public static void ExportPowerVfx(string package, JsonElement vfx, string outPath)
     {
         using IMEPackage pcc = MEPackageHandler.OpenMEPackage(package);
-        string powerClass = vfx.GetProperty("power").GetString();
-        ExportEntry power = pcc.Exports.FirstOrDefault(e => e.ObjectName.Instanced == "Default__" + powerClass)
-            ?? throw new ArgumentException($"No Default__{powerClass} in {Path.GetFileName(package)}.");
-        PropertyCollection powerProps = power.GetProperties();
+        // Without a power class (the omni-tool), only the roles the manifest names are exported.
+        PropertyCollection powerProps = new PropertyCollection();
+        if (vfx.TryGetProperty("power", out JsonElement powerName))
+        {
+            string powerClass = powerName.GetString();
+            ExportEntry power = pcc.Exports.FirstOrDefault(e => e.ObjectName.Instanced == "Default__" + powerClass)
+                ?? throw new ArgumentException($"No Default__{powerClass} in {Path.GetFileName(package)}.");
+            powerProps = power.GetProperties();
+        }
 
         var builder = new LevelBuilder(1024);
         var textures = new TextureCache(pcc, new List<string>(), builder._materials, builder._images)
@@ -63,11 +71,16 @@ public partial class LevelBuilder
         };
         NodeBuilder effects = builder._root.CreateNode("Effects");
 
-        foreach (var (role, property) in EffectRoles)
+        // The power's four roles, then any other role the manifest names (the omni-tool's arm and hand).
+        var roles = EffectRoles.ToList();
+        foreach (JsonProperty named in vfx.EnumerateObject())
+            if (named.Name != "power" && !roles.Any(r => r.Role == named.Name))
+                roles.Add((named.Name, null));
+        foreach (var (role, property) in roles)
         {
             ExportEntry template = vfx.TryGetProperty(role, out JsonElement named)
                 ? pcc.Exports.FirstOrDefault(e => e.InstancedFullPath.Equals(named.GetString(), StringComparison.OrdinalIgnoreCase))
-                : powerProps.GetProp<ObjectProperty>(property) is ObjectProperty o && pcc.TryGetUExport(o.Value, out ExportEntry t) ? t : null;
+                : property != null && powerProps.GetProp<ObjectProperty>(property) is ObjectProperty o && pcc.TryGetUExport(o.Value, out ExportEntry t) ? t : null;
             if (template == null)
             {
                 Console.WriteLine($"  {role}: no template");
@@ -77,6 +90,41 @@ public partial class LevelBuilder
             effects.AddNode(new NodeBuilder(role, new JsonObject { ["me_effect"] = effect }));
         }
         builder.WriteEffects(outPath);
+    }
+
+    // A location module's offset from its bone (m_LocationAdjust, Unreal units in the bone's frame)
+    // and turn (m_RotationAdjust, in turns: X roll, Y pitch, Z yaw, as Cascade's rotations), as
+    // one transform in the bone's glTF frame: { x, y, z (basis vectors), origin }. Null when both
+    // are zero. Their tables are constants: [min, max, x, y, z, ...]; the first entry is used.
+    private static JsonObject LocationAdjust(PropertyCollection p)
+    {
+        Vector3 First(string name)
+        {
+            var table = p.GetProp<StructProperty>(name)?.GetProp<ArrayProperty<FloatProperty>>("LookupTable");
+            return table == null || table.Count < 5 ? Vector3.Zero : new Vector3(table[2].Value, table[3].Value, table[4].Value);
+        }
+        Vector3 move = First("m_LocationAdjust");
+        Vector3 turn = First("m_RotationAdjust") * MathF.Tau;
+        if (move == Vector3.Zero && turn == Vector3.Zero)
+            return null;
+        // Unreal's FRotationMatrix (as ScaleRotationTranslation) from roll X, pitch Y, yaw Z.
+        float sr = MathF.Sin(turn.X), cr = MathF.Cos(turn.X);
+        float sp = MathF.Sin(turn.Y), cp = MathF.Cos(turn.Y);
+        float sy = MathF.Sin(turn.Z), cy = MathF.Cos(turn.Z);
+        var m = new Matrix4x4(
+            cp * cy, cp * sy, sp, 0,
+            sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp, 0,
+            -(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp, 0,
+            move.X, move.Y, move.Z, 1);
+        Matrix4x4 g = UnrealTransform.ToGltf(m);
+        JsonArray Row(float a, float b, float c) => new JsonArray(a, b, c);
+        return new JsonObject
+        {
+            ["x"] = Row(g.M11, g.M12, g.M13),
+            ["y"] = Row(g.M21, g.M22, g.M23),
+            ["z"] = Row(g.M31, g.M32, g.M33),
+            ["origin"] = Row(g.M41, g.M42, g.M43),
+        };
     }
 
     // An RvrClientEffect's modules (see the header), with its particle systems' assets added.
@@ -140,6 +188,7 @@ public partial class LevelBuilder
                     json["reference"] = p.GetProp<EnumProperty>("m_eReference")?.Value.Instanced;
                     json["attach"] = B("m_bAttach");
                     json["rotation"] = p.GetProp<EnumProperty>("m_eRotationTarget")?.Value.Instanced;
+                    json["adjust"] = LocationAdjust(p);
                     break;
                 case "RvrCEffectModuleLifetime":
                     json["type"] = "lifetime";

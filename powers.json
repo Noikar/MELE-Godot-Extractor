@@ -6,7 +6,9 @@
       "label": "Warp",
       "note": "ME3's Warp (SFXPowerCustomAction_Warp: CastSound, ImpactSound), plus the cast clip's cloth foley (HMM_BC_ThrowBiotic's SFXAnimNotify_RaceWwiseEvent).",
       "package": "ME3/SFXPower_Warp.pcc",
-      "vfx": { "power": "SFXPowerCustomAction_Warp" },
+      "vfx": {
+        "power": "SFXPowerCustomAction_Warp"
+      },
       "sounds": {
         "cast": "Wwise_Power_Biotic_Warp.Play_power_biotic_P_warp_cast",
         "impact": "Wwise_Power_Biotic_Warp.Play_power_biotic_P_warp_impact",
@@ -18,10 +20,28 @@
       "label": "Lift",
       "note": "ME3 has no Lift; its Pull (SFXPowerCustomAction_Pull: CastSound, ImpactSound) floats the target the same way, so Lift sounds and looks like it (its lift crust is named here: only code references it).",
       "package": "ME3/SFXPower_Pull.pcc",
-      "vfx": { "power": "SFXPowerCustomAction_Pull", "target": "BioVFX_B_Pull.VCFX.Pull_Lift_Crust_VCFX" },
+      "vfx": {
+        "power": "SFXPowerCustomAction_Pull",
+        "target": "BioVFX_B_Pull.VCFX.Pull_Lift_Crust_VCFX"
+      },
       "sounds": {
         "cast": "Wwise_Power_Biotic_Pull.Play_power_biotic_P_pull_cast",
         "impact": "Wwise_Power_Biotic_Pull.Play_power_biotic_P_pull_impact"
+      }
+    },
+    {
+      "id": "omnitool",
+      "label": "Omni-tool",
+      "note": "Not a power: the omni-tool players use while their menu is open. ME3's left-arm hologram (OmniTool_LeftFull_VCFX_M: the arm and hand loops) and the sounds ME3's HMM_WI_OmniTool clips cue (AnimNotify_WwiseEvents: start and beeps on OmniEnter, end on OmniExit).",
+      "package": "ME3/SFXGame.pcc",
+      "vfx": {
+        "arm": "BioVFX_T_TechPowers._OmniTool.VCFX.OmniTool_Arm_Left_VCFX",
+        "hand": "BioVFX_T_TechPowers._OmniTool.VCFX.OmniTool_Hand_Left_VCFX"
+      },
+      "sounds": {
+        "start": "Wwise_VFX_Tech.Play_vfx_omni_tool_start@ME3/BIO_COMMON.pcc",
+        "beep": "Wwise_VFX_Tech.Play_vfx_omni_beep_button@ME3/BIO_COMMON.pcc",
+        "end": "Wwise_VFX_Tech.Play_vfx_omni_tool_end"
       }
     }
   ]

@@ -36,6 +36,9 @@ using COLLISION_VERTEX = VertexBuilder<VertexPosition, VertexEmpty, VertexEmpty>
 //                        (see LevelPawns.cs; the models are PawnAsset_<n> scene roots)
 //   Vfx/<package>_<actor>_vfx<n>  placeables' mesh effects (holograms), each a group of mesh
 //                        instances shown in some of its placeable's states (see AddPlaceableEffects)
+//   Merged/<package>/<chunk>  the static meshes drawn with ME1's lightmaps, merged in world space
+//                        by material, lightmap, and world cell, with a piece index (see LevelMerge.cs);
+//                        their instances' other sections stay under <package>/<actor>
 //
 // Beside the Level root, each skeletal placeable model is a scene root of its own,
 // PlaceableAsset_<mesh> ("placeable_asset": its name in the extras): its skeleton, skinned
@@ -65,7 +68,8 @@ public static class LevelCommand
     // and "--music-volumes <package> <MusicIDs>" (the BioMusicVolumes of another package, usually
     // the persistent level, whose MusicID is one of the comma-separated IDs; see LevelAudio.cs),
     // and "--stream-volumes <package>" (the BioTriggerStreams of another package, usually the
-    // persistent level, that show the level's chunks; see LevelAudio.cs).
+    // persistent level, that show the level's chunks; see LevelAudio.cs), and "--merge-cell <m>"
+    // (the merged chunks' world cell size in meters, default 32; 0 leaves every mesh separate).
     public static int Run(string outPath, string[] args)
     {
         LevelBuilder.DroppedSections.Clear();
@@ -75,11 +79,14 @@ public static class LevelCommand
         var streamSources = new List<string>();
         string npcs = null;
         int maxTexture = 1024;
+        float mergeCell = LevelBuilder.DefaultMergeCell;
         string soundsDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--max-texture" && i + 1 < args.Length)
                 maxTexture = int.Parse(args[++i]);
+            else if (args[i] == "--merge-cell" && i + 1 < args.Length)
+                mergeCell = float.Parse(args[++i], System.Globalization.CultureInfo.InvariantCulture);
             else if (args[i] == "--sounds" && i + 1 < args.Length)
                 soundsDir = args[++i];
             else if (args[i] == "--markers" && i + 2 < args.Length)
@@ -101,7 +108,7 @@ public static class LevelCommand
             return 1;
         }
 
-        var builder = new LevelBuilder(maxTexture, soundsDir);
+        var builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell };
         if (npcs != null)
             builder.AddPawnPatterns(npcs);
         for (int f = 0; f < files.Length; f++)
@@ -145,7 +152,8 @@ public static class LevelCommand
     }
 }
 
-// Accumulates every package's actors into one scene.
+// Accumulates every package's actors into one scene. Static meshes drawn with ME1's lightmaps
+// are merged into chunks under Merged/ (LevelMerge.cs).
 public partial class LevelBuilder
 {
     // A StaticMesh's LOD 0, read once and shared by every instance: its geometry in glTF
@@ -193,6 +201,8 @@ public partial class LevelBuilder
     private readonly Dictionary<string, MeshGeometry> _geometry = new(StringComparer.OrdinalIgnoreCase);
     // Render meshes per StaticMesh, second UV set, and material overrides (null: nothing drawn).
     private readonly Dictionary<string, IMeshBuilder<MaterialBuilder>> _renders = new(StringComparer.OrdinalIgnoreCase);
+    // Section materials per StaticMesh and material overrides (see SectionMaterials).
+    private readonly Dictionary<string, MaterialBuilder[]> _sectionMaterials = new(StringComparer.OrdinalIgnoreCase);
     // Lightmap atlas pages by package and textures, or -1 when a page couldn't be decoded.
     private readonly Dictionary<string, int> _lightmapPages = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, MaterialBuilder> _materials = new(StringComparer.OrdinalIgnoreCase);
@@ -238,6 +248,7 @@ public partial class LevelBuilder
         _placeablesNode = _root.CreateNode("Placeables");
         _decalsNode = _root.CreateNode("Decals");
         _effectsNode = _root.CreateNode("Vfx");
+        _mergedNode = _root.CreateNode("Merged");
         _scene.AddNode(_root);
     }
 
@@ -300,6 +311,8 @@ public partial class LevelBuilder
                 Console.Error.WriteLine($"  {actor.ObjectName.Instanced} (decal) failed: {(Environment.GetEnvironmentVariable("LEXEXPORT_TRACE") == "1" ? ex.ToString() : ex.Message)}");
             }
         }
+        // After the decals, which only need the receivers' transforms and lighting.
+        WriteMergedChunks(packageName);
 
         if (_trimeshTriangles > trisBefore)
             _scene.AddRigidMesh(trimesh, _collision.CreateNode(trimesh.Name));
@@ -855,7 +868,7 @@ public partial class LevelBuilder
         JsonObject mover = MoverExtras(actor, actorProps, UnrealTransform.ComponentToActor(componentProps));
         if (!hidden)
             AddRenderInstance(pcc, actor, component, componentProps, meshExport, geometry, world, packageNode, textures,
-                mover: mover);
+                mover: mover, mergeable: mover == null);
 
         // A mover's collision would stay at its start (LevelMovers.cs).
         if (mover != null || !BlocksPlayer(actorProps, componentProps))
@@ -891,22 +904,34 @@ public partial class LevelBuilder
     //     (COLOR_0, and TEXCOORD_2/3, which Godot reads as CUSTOM0), so the instance gets its
     //     own copy of the mesh.
     // Both are stored quantized; scale0 and scale1 (the light-map scales) bring them back.
+    // mergeable: the instance stands still and is always shown, so its lightmapped sections may
+    // join its package's merged chunks (LevelMerge.cs); its other sections stay on its own node.
     private void AddRenderInstance(IMEPackage pcc, ExportEntry actor, ExportEntry component, PropertyCollection componentProps,
         ExportEntry meshExport, MeshGeometry geometry, Matrix4x4 world, NodeBuilder packageNode, TextureCache textures,
-        string nodeName = null, JsonObject mover = null)
+        string nodeName = null, JsonObject mover = null, bool mergeable = false)
     {
         // The component's material overrides, per element.
         int[] overrides = componentProps.GetProp<ArrayProperty<ObjectProperty>>("Materials")?.Select(o => o.Value).ToArray() ?? [];
         string overrideKey = overrides.Length > 0 ? "|" + string.Join(",", overrides.Select(o => pcc.GetEntry(o)?.InstancedFullPath)) : "";
+        string materialsKey = meshExport.InstancedFullPath + overrideKey;
+        if (!_sectionMaterials.TryGetValue(materialsKey, out MaterialBuilder[] materials))
+            _sectionMaterials[materialsKey] = materials = SectionMaterials(geometry, overrides, textures);
+        string name = nodeName ?? actor.ObjectName.Instanced;
 
         LightMap lightMap = ReadLightMap(component);
         var lighting = new JsonObject { ["type"] = "none" };
         IMeshBuilder<MaterialBuilder> render;
+        // The sections drawn on the instance's own node (the rest are merged).
+        MaterialBuilder[] own = materials;
+        bool merged = false;
         var vertexMap = lightMap as LightMap_1D;
         byte[] vertexSamples = vertexMap != null ? ReadVertexSamples(component, geometry.GltfPositions.Length) : null;
         if (vertexSamples != null)
         {
-            render = BuildRender(geometry, overrides, textures, geometry.LightmapInRange ? geometry.LightmapChannel : 0, vertexSamples);
+            int uv2 = geometry.LightmapInRange ? geometry.LightmapChannel : 0;
+            if (mergeable)
+                own = AddMergePiece(name, geometry, materials, world, uv2, -1, Vector4.Zero, vertexMap.ScaleVector1, vertexMap.ScaleVector2, vertexSamples, out merged);
+            render = BuildRender(geometry, own, uv2, vertexSamples);
             lighting = new JsonObject
             {
                 ["type"] = "vertex",
@@ -922,9 +947,16 @@ public partial class LevelBuilder
             // lightmap needs that layout even when it strays outside 0-1, which the game allows
             // but Godot's lightmapper doesn't (lightmap_uv: false below keeps it out of bakes).
             int uv2 = page >= 0 || geometry.LightmapInRange ? geometry.LightmapChannel : 0;
-            string key = $"{meshExport.InstancedFullPath}|{uv2}{overrideKey}";
+            if (mergeable && page >= 0)
+            {
+                var scaleBias = new Vector4(textureMap.CoordinateScale.X, textureMap.CoordinateScale.Y,
+                    textureMap.CoordinateBias.X, textureMap.CoordinateBias.Y);
+                own = AddMergePiece(name, geometry, materials, world, uv2, page, scaleBias, textureMap.ScaleVector1, textureMap.ScaleVector2, null, out merged);
+            }
+            // The sections left once the rest are merged are a mesh of their own, shared the same way.
+            string key = $"{meshExport.InstancedFullPath}|{uv2}{overrideKey}{(merged ? "|unmerged" : "")}";
             if (!_renders.TryGetValue(key, out render))
-                _renders[key] = render = BuildRender(geometry, overrides, textures, uv2, null);
+                _renders[key] = render = BuildRender(geometry, own, uv2, null);
             if (page >= 0)
             {
                 lighting = new JsonObject
@@ -938,20 +970,25 @@ public partial class LevelBuilder
                 };
             }
         }
-        if (render == null)
+        if (render == null && !merged)
             return;
+        if (lighting["type"].GetValue<string>() != "none")
+            _mergeSeparate += own.Count(m => m != null);
 
-        // Meshes without their own 0-1 lightmap UVs carry other UVs (often their tiling shading
-        // UVs) in the second set; the loader keeps those out of Godot lightmap bakes.
-        var extras = new JsonObject { ["me_lightmap"] = lighting };
-        if (!geometry.LightmapInRange)
-            extras["lightmap_uv"] = false;
-        if (mover != null)
-            extras["me_mover"] = mover;
-        var node = new NodeBuilder(nodeName ?? actor.ObjectName.Instanced, extras);
-        packageNode.AddNode(node);
-        node.LocalMatrix = UnrealTransform.ToGltf(world);
-        _scene.AddRigidMesh(render, node);
+        if (render != null)
+        {
+            // Meshes without their own 0-1 lightmap UVs carry other UVs (often their tiling shading
+            // UVs) in the second set; the loader keeps those out of Godot lightmap bakes.
+            var extras = new JsonObject { ["me_lightmap"] = lighting };
+            if (!geometry.LightmapInRange)
+                extras["lightmap_uv"] = false;
+            if (mover != null)
+                extras["me_mover"] = mover;
+            var node = new NodeBuilder(name, extras);
+            packageNode.AddNode(node);
+            node.LocalMatrix = UnrealTransform.ToGltf(world);
+            _scene.AddRigidMesh(render, node);
+        }
         _instances++;
         _receivers[component.UIndex] = (world, lighting);
         string type = lighting["type"].GetValue<string>();
@@ -1246,7 +1283,10 @@ public partial class LevelBuilder
     // lightmap, its samples (raw quantized bytes; see AddRenderInstance). Null when none of
     // its sections are drawn.
     private static IMeshBuilder<MaterialBuilder> BuildRender(MeshGeometry g, int[] overrides, TextureCache textures,
-        int uv2, byte[] samples)
+        int uv2, byte[] samples) => BuildRender(g, SectionMaterials(g, overrides, textures), uv2, samples);
+
+    // The same with each section's material already chosen (null: not drawn).
+    private static IMeshBuilder<MaterialBuilder> BuildRender(MeshGeometry g, MaterialBuilder[] materials, int uv2, byte[] samples)
     {
         int count = g.GltfPositions.Length;
         if (samples == null)
@@ -1254,7 +1294,7 @@ public partial class LevelBuilder
             var vertices = new VERTEX[count];
             for (int v = 0; v < count; v++)
                 vertices[v] = new VERTEX(new VertexPositionNormalTangent(g.GltfPositions[v], g.Normals[v], g.Tangents[v]), new VertexTexture2(g.UVs[0][v], g.UVs[uv2][v]));
-            return AddSections(new MeshBuilder<VertexPositionNormalTangent, VertexTexture2, VertexEmpty>(g.Name), vertices, g, overrides, textures);
+            return AddSections(new MeshBuilder<VertexPositionNormalTangent, VertexTexture2, VertexEmpty>(g.Name), vertices, g, materials);
         }
 
         var lit = new VERTEX_LIT[count];
@@ -1266,7 +1306,23 @@ public partial class LevelBuilder
                 new VertexColor1Texture4(color, g.UVs[0][v], g.UVs[uv2][v],
                     new Vector2(directional.X, directional.Y), new Vector2(directional.Z, 0f)));
         }
-        return AddSections(new MeshBuilder<VertexPositionNormalTangent, VertexColor1Texture4, VertexEmpty>(g.Name), lit, g, overrides, textures);
+        return AddSections(new MeshBuilder<VertexPositionNormalTangent, VertexColor1Texture4, VertexEmpty>(g.Name), lit, g, materials);
+    }
+
+    // Each section's material: the component's override for its element, else the mesh's own.
+    // Overrides come from the instance's own package; the mesh's own materials were resolved in
+    // the package it was read from. Null for sections that aren't drawn.
+    private static MaterialBuilder[] SectionMaterials(MeshGeometry g, int[] overrides, TextureCache textures)
+    {
+        var materials = new MaterialBuilder[g.Lod.Elements.Length];
+        for (int s = 0; s < materials.Length; s++)
+        {
+            StaticMeshElement element = g.Lod.Elements[s];
+            materials[s] = element.MaterialIndex < overrides.Length && overrides[element.MaterialIndex] != 0
+                ? DrawnMaterial(textures, overrides[element.MaterialIndex], $"{g.Name}_mat{element.MaterialIndex}")
+                : g.SectionMaterials[s];
+        }
+        return materials;
     }
 
     // A vertex's glTF tangent from Unreal's TangentX and TangentZ (whose W holds the bitangent
@@ -1309,7 +1365,7 @@ public partial class LevelBuilder
     internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> DroppedSections = new();
 
     private static IMeshBuilder<MaterialBuilder> AddSections<TvM>(MeshBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> builder,
-        VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty>[] vertices, MeshGeometry g, int[] overrides, TextureCache textures)
+        VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty>[] vertices, MeshGeometry g, MaterialBuilder[] materials)
         where TvM : struct, IVertexMaterial
     {
         ushort[] indices = g.Lod.IndexBuffer;
@@ -1317,11 +1373,7 @@ public partial class LevelBuilder
         for (int s = 0; s < g.Lod.Elements.Length; s++)
         {
             StaticMeshElement element = g.Lod.Elements[s];
-            // Overrides come from the instance's own package; the mesh's own materials were
-            // resolved in the package it was read from.
-            MaterialBuilder material = g.SectionMaterials[s];
-            if (element.MaterialIndex < overrides.Length && overrides[element.MaterialIndex] != 0)
-                material = DrawnMaterial(textures, overrides[element.MaterialIndex], $"{g.Name}_mat{element.MaterialIndex}");
+            MaterialBuilder material = materials[s];
             if (material == null)
                 continue;
             var primitive = builder.UsePrimitive(material);
@@ -1628,6 +1680,7 @@ public partial class LevelBuilder
         Console.WriteLine($"Textures: {dds}.");
         Console.WriteLine($"Original lighting: {_textureLit} instances from {_pageCount} lightmap pages, {_vertexLit} from vertex lightmaps, "
             + $"{_instances - _textureLit - _vertexLit} without; {_placeables} placeables.");
+        Console.WriteLine(MergeSummary());
         Console.WriteLine($"Particles: {_emitters} emitters from {_particleSystems.Count(s => s.Value.Count > 0)} of {_particleSystems.Count} systems.");
         Console.WriteLine($"Start markers: {_markerCount}.");
         Console.WriteLine($"Decals: {_decals}, drawn on {_decalMeshes} receivers ({_decalsUnlit} without original lighting left out).");

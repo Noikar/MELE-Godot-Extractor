@@ -144,14 +144,19 @@ public static class ManifestCommand
     }
 
     // A power's sounds (Wwise): <out>/<id>/<sound>.wav and sounds.json, { <sound>: { "layers" } },
-    // and its visual effects (PowerVfx): <out>/<id>/vfx.glb.
+    // and its visual effects (PowerVfx): <out>/<id>/vfx.glb. A sound written "<event>@<package>"
+    // comes from another package than the entry's (the omni-tool's start and end live apart).
     private static void ExportPower(JsonElement entry, string id, string outDir)
     {
         string package = Program.ResolvePackage(entry.GetProperty("package").GetString());
         string folder = Path.Combine(outDir, id);
         var sounds = new JsonObject();
         foreach (JsonProperty sound in entry.GetProperty("sounds").EnumerateObject())
-            sounds[sound.Name] = WwiseExport.Export(package, sound.Value.GetString(), folder, sound.Name);
+        {
+            string[] parts = sound.Value.GetString().Split('@', 2);
+            string from = parts.Length == 2 ? Program.ResolvePackage(parts[1]) : package;
+            sounds[sound.Name] = WwiseExport.Export(from, parts[0], folder, sound.Name);
+        }
         OutputFiles.Write(Path.Combine(folder, "sounds.json"), temporary =>
             File.WriteAllText(temporary, sounds.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
         if (entry.TryGetProperty("vfx", out JsonElement vfx))
@@ -189,6 +194,12 @@ public static class ManifestCommand
         // The streaming volumes that show the level's areas, from the same kind of package.
         if (entry.TryGetProperty("stream_volumes", out JsonElement streamVolumes))
             args.AddRange(["--stream-volumes", streamVolumes.GetString()]);
+        // Merged chunks (LevelMerge.cs): "merge": false leaves every mesh separate, and
+        // "merge_cell" sets their world cells' size in meters.
+        if (entry.TryGetProperty("merge", out JsonElement merge) && merge.ValueKind == JsonValueKind.False)
+            args.AddRange(["--merge-cell", "0"]);
+        else if (entry.TryGetProperty("merge_cell", out JsonElement mergeCell))
+            args.AddRange(["--merge-cell", mergeCell.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)]);
         if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray()) != 0)
             throw new InvalidOperationException("level export returned an error");
 
