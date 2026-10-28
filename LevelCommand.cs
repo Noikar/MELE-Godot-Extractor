@@ -70,7 +70,9 @@ public static class LevelCommand
     // and "--stream-volumes <package>" (the BioTriggerStreams of another package, usually the
     // persistent level, that show the level's chunks; see LevelAudio.cs), and "--merge-cell <m>"
     // (the merged chunks' world cell size in meters, default 32; 0 leaves every mesh separate).
-    public static int Run(string outPath, string[] args)
+    // steps reports each package read, the build, and the save (and laterSteps more the caller
+    // runs after it, such as the music) for the game's progress bar.
+    public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
     {
         LevelBuilder.DroppedSections.Clear();
         var patterns = new List<string>();
@@ -108,11 +110,14 @@ public static class LevelCommand
             return 1;
         }
 
-        var builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell };
+        var builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell, Steps = steps };
+        if (steps != null)
+            steps.Total = files.Length + 2 + laterSteps;
         if (npcs != null)
             builder.AddPawnPatterns(npcs);
         for (int f = 0; f < files.Length; f++)
         {
+            steps?.Next($"Reading {Path.GetFileNameWithoutExtension(files[f])}");
             Console.WriteLine($"Reading {f + 1}/{files.Length} {Path.GetFileNameWithoutExtension(files[f])}");
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(files[f]);
             builder.AddPackage(pcc);
@@ -182,6 +187,9 @@ public partial class LevelBuilder
         public Vector3[] Positions;              // for per-triangle collision
         public List<(int A, int B, int C)> CollisionTriangles;
     }
+
+    // Reports the build and the save (LevelCommand.Run reports the packages).
+    public EntrySteps Steps { get; init; }
 
     private readonly int _maxTexture;
     private readonly SceneBuilder _scene = new("Level");
@@ -1667,11 +1675,13 @@ public partial class LevelBuilder
     public void Write(string outPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+        Steps?.Next("Building the level");
         AddMaterialTextures();
         var clock = System.Diagnostics.Stopwatch.StartNew();
         SharpGLTF.Schema2.ModelRoot model = _scene.ToGltf2(Program.GltfSettings);
         string dds = DdsTextures.Convert(model);
         double built = clock.Elapsed.TotalSeconds;
+        Steps?.Next("Saving the level");
         OutputFiles.Write(outPath, temporary => model.SaveGLB(temporary, Program.GlbSettings));
         WriteLooks(outPath);
         Console.WriteLine($"Wrote {outPath}: {_renders.Count} meshes, {_instances} instances, {_materials.Count} materials, "

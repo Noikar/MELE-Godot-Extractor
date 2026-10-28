@@ -200,10 +200,15 @@ public static class ManifestCommand
             args.AddRange(["--merge-cell", "0"]);
         else if (entry.TryGetProperty("merge_cell", out JsonElement mergeCell))
             args.AddRange(["--merge-cell", mergeCell.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)]);
-        if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray()) != 0)
+        var steps = new EntrySteps();
+        if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray(), steps, laterSteps: musicIds.Length > 0 ? 1 : 0) != 0)
             throw new InvalidOperationException("level export returned an error");
 
-        if (musicIds.Length > 0 && MusicCommand.Run(outDir, musicIds) != 0)
-            throw new InvalidOperationException("music export returned an error");
+        if (musicIds.Length > 0)
+        {
+            steps.Next("Music");
+            if (MusicCommand.Run(outDir, musicIds) != 0)
+                throw new InvalidOperationException("music export returned an error");
+        }
     }
 }

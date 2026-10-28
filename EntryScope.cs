@@ -96,3 +96,22 @@ public sealed class EntryLog : TextWriter
         _out.Flush();
     }
 }
+
+// A long entry's steps (a level's packages, building, saving, music), printed straight out as
+// "STEP <n>/<total> <name>" as each starts, for the game's second progress bar. Total is set
+// once the entry knows it; outside a manifest run the lines go to the console as they are.
+public sealed class EntrySteps
+{
+    private int _done;
+
+    public int Total { get; set; }
+
+    public void Next(string name)
+    {
+        string line = $"STEP {++_done}/{Math.Max(Total, _done)} {name}\n";
+        if (Console.Out is EntryLog log)
+            log.Direct(line);
+        else
+            Console.Write(line);
+    }
+}
