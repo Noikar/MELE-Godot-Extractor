@@ -1,5 +1,5 @@
 {
-  "version": 25,
+  "version": 26,
   "levels": [
     {
       "id": "wards",
@@ -12,6 +12,7 @@
       "markers": { "package": "ME1/BIOA_STA00.pcc", "tags": "start_sta60_*" },
       "transit": { "package": "ME1/BIOA_STA00.pcc", "tags": "stage_callCab?" },
       "npcs": "*_amb_*,Keeper",
+      "collision_bounds": { "min": [-185, -370, -120], "max": [130, 15, 215] },
       "packages": [
         "ME1/BIOA_STA60_??_LAY.pcc",
         "ME1/BIOA_STA60_??_ART.pcc",

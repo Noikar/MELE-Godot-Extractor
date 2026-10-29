@@ -203,6 +203,14 @@ public static class ManifestCommand
             args.AddRange(["--merge-cell", "0"]);
         else if (entry.TryGetProperty("merge_cell", out JsonElement mergeCell))
             args.AddRange(["--merge-cell", mergeCell.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        // The playable area, { "min": [x, y, z], "max": [x, y, z] } in glTF space: collision
+        // entirely outside it is dropped (LevelBuilder.CollisionBounds).
+        if (entry.TryGetProperty("collision_bounds", out JsonElement bounds))
+        {
+            string Corner(string key) => string.Join(",", bounds.GetProperty(key).EnumerateArray()
+                .Select(v => v.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)));
+            args.AddRange(["--collision-bounds", Corner("min"), Corner("max")]);
+        }
         var steps = new EntrySteps();
         if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray(), steps, laterSteps: musicIds.Length > 0 ? 1 : 0) != 0)
             throw new InvalidOperationException("level export returned an error");

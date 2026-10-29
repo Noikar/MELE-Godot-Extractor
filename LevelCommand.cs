@@ -70,8 +70,10 @@ public static class LevelCommand
     // and "--music-volumes <package> <MusicIDs>" (the BioMusicVolumes of another package, usually
     // the persistent level, whose MusicID is one of the comma-separated IDs; see LevelAudio.cs),
     // and "--stream-volumes <package>" (the BioTriggerStreams of another package, usually the
-    // persistent level, that show the level's chunks; see LevelAudio.cs), and "--merge-cell <m>"
-    // (the merged chunks' world cell size in meters, default 32; 0 leaves every mesh separate).
+    // persistent level, that show the level's chunks; see LevelAudio.cs), "--merge-cell <m>"
+    // (the merged chunks' world cell size in meters, default 32; 0 leaves every mesh separate),
+    // and "--collision-bounds <min x,y,z> <max x,y,z>" (the playable area in glTF space, meters;
+    // collision entirely outside it is dropped, see LevelBuilder.CollisionBounds).
     // steps reports each package read, the build, and the save (and laterSteps more the caller
     // runs after it, such as the music) for the game's progress bar.
     public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
@@ -85,6 +87,7 @@ public static class LevelCommand
         string npcs = null;
         int maxTexture = 1024;
         float mergeCell = LevelBuilder.DefaultMergeCell;
+        (Vector3, Vector3)? collisionBounds = null;
         string soundsDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
         for (int i = 0; i < args.Length; i++)
         {
@@ -104,6 +107,8 @@ public static class LevelCommand
                 streamSources.Add(args[++i]);
             else if (args[i] == "--npcs" && i + 1 < args.Length)
                 npcs = args[++i];
+            else if (args[i] == "--collision-bounds" && i + 2 < args.Length)
+                collisionBounds = (ParseVector(args[++i]), ParseVector(args[++i]));
             else
                 patterns.Add(args[i]);
         }
@@ -115,7 +120,7 @@ public static class LevelCommand
             return 1;
         }
 
-        var builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell, Steps = steps };
+        var builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell, CollisionBounds = collisionBounds, Steps = steps };
         if (steps != null)
             steps.Total = files.Length + 2 + laterSteps;
         if (npcs != null)
@@ -152,6 +157,13 @@ public static class LevelCommand
         builder.Write(outPath);
         MaterialBaker.ForgetDecoded();
         return 0;
+    }
+
+    // "x,y,z" -> a vector, in the invariant culture.
+    private static Vector3 ParseVector(string text)
+    {
+        float[] parts = text.Split(',').Select(p => float.Parse(p, System.Globalization.CultureInfo.InvariantCulture)).ToArray();
+        return new Vector3(parts[0], parts[1], parts[2]);
     }
 
     // "ME1/BIOA_STA60_??_LAY.pcc" -> every matching package; localization packages are skipped.
@@ -240,7 +252,14 @@ public partial class LevelBuilder
     // original lighting, for the decals projected onto them.
     private readonly Dictionary<int, (Matrix4x4 World, JsonObject Lighting)> _receivers = new();
 
-    private int _instances, _lightCount, _hullCount, _trimeshTriangles;
+    private int _instances, _lightCount, _hullCount, _trimeshTriangles, _droppedHulls, _droppedTriangles;
+
+    // The level's playable area in glTF space (--collision-bounds; the manifest's
+    // "collision_bounds"). Collision entirely outside it is dropped: ME1 gives far scenery
+    // (the Presidium's end caps, a shell around the Wards kilometers across) full collision
+    // nobody can reach, and the server holds every map of a location in one physics world,
+    // where it would reach into the other maps. The scenery still draws.
+    public (Vector3 Min, Vector3 Max)? CollisionBounds { get; set; }
     private int _pageCount, _textureLit, _vertexLit, _placeables, _emitters, _markerCount, _skeletalPlaceables;
     private int _decals, _decalMeshes, _decalsUnlit, _effects;
     private readonly Dictionary<string, int> _skipped = new();
@@ -932,6 +951,12 @@ public partial class LevelBuilder
             var transformed = geometry.Positions.Select(p => new COLLISION_VERTEX(UnrealSpace.Position(Vector3.Transform(p, world)))).ToArray();
             foreach (var (a, b, c) in geometry.CollisionTriangles)
             {
+                if (CollisionBounds is var (areaMin, areaMax) && !TriangleTouchesBox(
+                    transformed[a].Geometry.Position, transformed[b].Geometry.Position, transformed[c].Geometry.Position, areaMin, areaMax))
+                {
+                    _droppedTriangles++;
+                    continue;
+                }
                 if (flip)
                     trimesh.AddTriangle(transformed[a], transformed[c], transformed[b]);
                 else
@@ -1635,12 +1660,60 @@ public partial class LevelBuilder
     private void AddHull(Vector3[] localPoints, Matrix4x4 world)
     {
         var points = localPoints.Select(p => new COLLISION_VERTEX(UnrealSpace.Position(Vector3.Transform(p, world)))).ToArray();
+        // Outside the playable area when its bounding box is (a slanted hull whose box touches
+        // the area is kept, which only errs toward keeping collision).
+        if (CollisionBounds is var (areaMin, areaMax))
+        {
+            Vector3 min = points[0].Geometry.Position, max = min;
+            foreach (COLLISION_VERTEX point in points)
+            {
+                min = Vector3.Min(min, point.Geometry.Position);
+                max = Vector3.Max(max, point.Geometry.Position);
+            }
+            if (min.X > areaMax.X || min.Y > areaMax.Y || min.Z > areaMax.Z
+                || max.X < areaMin.X || max.Y < areaMin.Y || max.Z < areaMin.Z)
+            {
+                _droppedHulls++;
+                return;
+            }
+        }
         var hull = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Hull_{_hullCount}");
         var primitive = hull.UsePrimitive(_collisionMaterial);
         for (int i = 1; i + 1 < points.Length; i++)
             primitive.AddTriangle(points[0], points[i], points[i + 1]);
         _scene.AddRigidMesh(hull, _collision.CreateNode(hull.Name));
         _hullCount++;
+    }
+
+    // Whether a triangle touches a box, by the separating axis test (Akenine-Möller): the box's
+    // three axes, the triangle's normal, and the nine crossings of their edges. A big triangle
+    // reaching through the box from far outside still counts.
+    private static bool TriangleTouchesBox(Vector3 a, Vector3 b, Vector3 c, Vector3 boxMin, Vector3 boxMax)
+    {
+        Vector3 center = (boxMin + boxMax) * 0.5f;
+        Vector3 half = (boxMax - boxMin) * 0.5f;
+        Vector3 v0 = a - center, v1 = b - center, v2 = c - center;
+        Vector3 e0 = v1 - v0, e1 = v2 - v1, e2 = v0 - v2;
+
+        // Separated along an axis when the triangle's projection misses the box's.
+        bool Separated(Vector3 axis)
+        {
+            float p0 = Vector3.Dot(v0, axis), p1 = Vector3.Dot(v1, axis), p2 = Vector3.Dot(v2, axis);
+            float radius = half.X * MathF.Abs(axis.X) + half.Y * MathF.Abs(axis.Y) + half.Z * MathF.Abs(axis.Z);
+            return MathF.Min(p0, MathF.Min(p1, p2)) > radius || MathF.Max(p0, MathF.Max(p1, p2)) < -radius;
+        }
+
+        if (Separated(Vector3.UnitX) || Separated(Vector3.UnitY) || Separated(Vector3.UnitZ))
+            return false;
+        if (Separated(Vector3.Cross(e0, e1)))
+            return false;
+        foreach (Vector3 edge in (ReadOnlySpan<Vector3>)[e0, e1, e2])
+        {
+            if (Separated(Vector3.Cross(Vector3.UnitX, edge)) || Separated(Vector3.Cross(Vector3.UnitY, edge))
+                || Separated(Vector3.Cross(Vector3.UnitZ, edge)))
+                return false;
+        }
+        return true;
     }
 
     // Unreal light components become KHR_lights_punctual lights. Intensities are only a
@@ -1762,6 +1835,8 @@ public partial class LevelBuilder
             + $"{_images.Count} textures, {_lightCount} lights, {_hullCount} hulls, {_trimeshTriangles} collision triangles "
             + $"(glTF built in {built:0.0} s, saved in {clock.Elapsed.TotalSeconds - built:0.0} s).");
         Console.WriteLine($"Textures: {dds}.");
+        if (CollisionBounds is var (areaMin, areaMax))
+            Console.WriteLine($"Collision bounds {areaMin} to {areaMax}: dropped {_droppedHulls} hulls and {_droppedTriangles} collision triangles outside.");
         Console.WriteLine($"Original lighting: {_textureLit} instances from {_pageCount} lightmap pages, {_vertexLit} from vertex lightmaps, "
             + $"{_instances - _textureLit - _vertexLit} without; {_placeables} placeables.");
         Console.WriteLine(MergeSummary());
