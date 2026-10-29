@@ -561,20 +561,22 @@ public class TextureCache
     private ExportEntry TextureFor(MaterialUniformExpressionTexture expression, ExportEntry baseMaterial, Dictionary<string, ExportEntry> textures,
         Defaults defaults = null)
     {
+        // An instance's own value may be a render target too (the Presidium's floor reflections).
         if (expression is MaterialUniformExpressionTextureParameter parameter
             && textures.TryGetValue(parameter.ParameterName.Instanced, out ExportEntry overridden))
-            return overridden;
+            return overridden.ClassName.Contains("RenderTarget") ? null : overridden;
         defaults ??= Defaults.Of(baseMaterial);
         return defaults.Texture(expression.TextureIndex) is ExportEntry texture
             && texture.ClassName is "Texture2D" or "TextureFlipBook" ? texture : null;
     }
 
     // Packages the game always has loaded, which hold shared effect textures that other
-    // packages import: ME1's BIOC_Materials (the holograms', distortion maps); ME3's SFXGame
-    // and Startup (BioVFX_Z_TEXTURES: the powers' gradients and noise), and ME2's SFXGame.
+    // packages import: ME1's BIOC_Materials (the holograms', distortion maps) and SFXGame
+    // (BIOG_V_Z_TEXTURES_A_Z: the Citadel fountains' water); ME3's SFXGame and Startup
+    // (BioVFX_Z_TEXTURES: the powers' gradients and noise), and ME2's SFXGame.
     private static readonly Dictionary<MEGame, string[]> SharedPackages = new()
     {
-        [MEGame.LE1] = ["BIOC_Materials.pcc"],
+        [MEGame.LE1] = ["BIOC_Materials.pcc", "SFXGame.pcc"],
         [MEGame.LE2] = ["SFXGame.pcc"],
         [MEGame.LE3] = ["SFXGame.pcc", "Startup.pcc"],
     };
@@ -987,7 +989,8 @@ public class TextureCache
     // A material's parameter textures plus every texture its base material samples directly.
     private List<ExportEntry> CandidateTextures(ExportEntry material, IEnumerable<ExportEntry> parameterTextures)
     {
-        var candidates = new List<ExportEntry>(parameterTextures);
+        // Realtime reflections' render targets hold no image.
+        var candidates = new List<ExportEntry>(parameterTextures.Where(t => !t.ClassName.Contains("RenderTarget")));
         ExportEntry baseMaterial = BaseMaterial(material);
         if (baseMaterial != null)
         {

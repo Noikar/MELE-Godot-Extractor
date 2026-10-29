@@ -76,22 +76,28 @@ public static class ShaderTranslator
     // policy reads its atlas UVs from TEXCOORD0 and the material UVs from TEXCOORD1; the
     // vertex-lightmap policy has the material UVs in TEXCOORD0 and the lightmap samples
     // (already decoded and scaled) in TEXCOORD2 and 3; the light-environment policy has its
-    // dominant light's direction in tangent space in TEXCOORD4. TEXCOORD5 is the pixel's position: in
+    // dominant light's direction in tangent space in TEXCOORD4 (a translucent one takes it in
+    // TEXCOORD3 and its fog in TEXCOORD4, as skinned hair does). TEXCOORD5 is the pixel's position: in
     // world space (relative to the camera) for shaders that use world positions, which is when
     // they read CameraWorldPos, and otherwise in clip space (screen position and depth).
-    private static string Input(Policy policy, string semantic, int index, bool worldPosition) => (semantic, index) switch
+    // The material UVs come in pairs, channels 0 and 1 in one register and 2 and 3 in the next
+    // (in_uv_extra, which only meshes whose materials read it carry).
+    private static string Input(Policy policy, string semantic, int index, bool worldPosition, bool lightIn3) => (semantic, index) switch
     {
         ("TEXCOORD", 10) => "in_tangent_x",
         ("TEXCOORD", 11) => "in_tangent_z",
         ("COLOR", 0) => "in_color",
         ("TEXCOORD", 0) => policy == Policy.TextureLightmap ? "in_lightmap_uv" : "in_uv",
         ("TEXCOORD", 1) when policy == Policy.TextureLightmap => "in_uv",
+        ("TEXCOORD", 2) when policy == Policy.TextureLightmap => "in_uv_extra",
+        ("TEXCOORD", 1) when policy is Policy.VertexLightmap or Policy.Unlit or Policy.LightEnvironment => "in_uv_extra",
         ("TEXCOORD", 2) when policy == Policy.VertexLightmap => "in_lightmap_color",
         ("TEXCOORD", 3) when policy == Policy.VertexLightmap => "in_lightmap_directional",
+        ("TEXCOORD", 3) when policy == Policy.LightEnvironment && lightIn3 => "in_light_vector",
         // Translucent surfaces get the vertex shader's height fog: in-scattered color, then
         // how much of the surface shows through. Lit ones (decals) read it over a lightmap.
         ("TEXCOORD", 4) when policy is Policy.Unlit or Policy.TextureLightmap or Policy.VertexLightmap => "in_fog",
-        ("TEXCOORD", 4) when policy == Policy.LightEnvironment => "in_light_vector",
+        ("TEXCOORD", 4) when policy == Policy.LightEnvironment => lightIn3 ? "in_fog" : "in_light_vector",
         ("TEXCOORD", 5) => worldPosition ? "in_world_position" : "in_screen_position",
         ("TEXCOORD", 6) => "in_camera_vector",
         ("TEXCOORD", 7) => "in_sky_vector",
@@ -131,6 +137,13 @@ public static class ShaderTranslator
         {
             _lines = asm.Split('\n').Select(l => l.Trim()).ToArray();
             _policy = policy;
+            // A translucent light-environment shader has its light vector in TEXCOORD3 (the
+            // opaque ones have no TEXCOORD3 input).
+            bool lightIn3 = policy == Policy.LightEnvironment && _lines.Any(l =>
+            {
+                Match row = SignatureRow.Match(l);
+                return row.Success && row.Groups[1].Value == "TEXCOORD" && row.Groups[2].Value == "3";
+            });
             string section = "";
             foreach (string line in _lines)
             {
@@ -148,7 +161,7 @@ public static class ShaderTranslator
                 Match m;
                 if (section == "input" && (m = SignatureRow.Match(line)).Success)
                 {
-                    string name = Input(policy, m.Groups[1].Value, int.Parse(m.Groups[2].Value), _worldPosition);
+                    string name = Input(policy, m.Groups[1].Value, int.Parse(m.Groups[2].Value), _worldPosition, lightIn3);
                     if (name != null)
                         _inputs[int.Parse(m.Groups[3].Value)] = name;
                 }
@@ -513,6 +526,9 @@ public static class ShaderTranslator
             return field.Name switch
             {
                 "CameraWorldPos" => c < 3 ? $"camera_world_pos.{xyzw[c]}" : "0.0",
+                // The primitive's bounds: center (Unreal axes, cm) and sphere radius, per
+                // instance (the node's me_bounds; cargo containers offset their noise by it).
+                "ObjectWorldPositionAndRadius" => $"object_bounds.{xyzw[c]}",
                 "LightMapScale" => c < 3 ? $"lightmap_scale{element}.{xyzw[c]}" : "0.0",
                 // Unreal packs matrices a row per register (row vectors); the Godot side keeps
                 // them as column-vector mat3s, so register k component c is m[k][c].

@@ -73,8 +73,22 @@ public partial class LevelBuilder
     private readonly Dictionary<MaterialBuilder, MergeKind> _mergeable = new(ReferenceEqualityComparer.Instance);
     private int _mergeSurfaces, _mergeChunks, _mergeSeparate, _mergeSharedPieces;
 
-    // Translated code that reads the object's transform or the second UV set (in_uv.zw).
-    private static readonly Regex InstanceDependent = new(@"local_to_world|world_to_local|in_uv\.[xyzw]*[zw]");
+    // Translated code that reads the object's transform, its bounds, the second UV set
+    // (in_uv.zw), or UV channels 2 and 3 (which only separate meshes carry; see BuildRender).
+    private static readonly Regex InstanceDependent = new(@"local_to_world|world_to_local|object_bounds|in_uv_extra|in_uv\.[xyzw]*[zw]");
+
+    // Whether any of a material's translations reads a name (an input, uniform, or constant).
+    private static bool Reads(MaterialBuilder material, string name)
+    {
+        if (material?.Extras is not JsonObject extras || extras["me_material"] is not JsonObject translated)
+            return false;
+        foreach (string policy in new[] { "texture", "vertex", "unlit", "environment" })
+        {
+            if (translated[policy]?["code"]?.GetValue<string>() is string code && code.Contains(name))
+                return true;
+        }
+        return false;
+    }
 
     // Adds an instance's mergeable sections to the current package's chunks and returns the
     // section materials left for its own node (merged ones null). merged: any section was.

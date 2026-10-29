@@ -224,6 +224,11 @@ public static class ParticleExport
                     case "ParticleModuleRotationRate":
                         json["rotation_rate"] = Dist(p, "StartRotationRate", Kind.Float);
                         break;
+                    // UE3 resets the rotation rate (a sprite's, or a mesh's per-axis one) to its
+                    // base every tick and multiplies it by this at the particle's relative time.
+                    case "ParticleModuleRotationRateMultiplyLife":
+                        json["rotation_rate_life"] = Dist(p, "LifeMultiplier", Kind.Float);
+                        break;
                     case "ParticleModuleMeshRotation":
                         json["mesh_rotation"] = Dist(p, "StartRotation", Kind.Rotation);
                         break;

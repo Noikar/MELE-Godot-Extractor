@@ -174,6 +174,7 @@ public partial class LevelBuilder
         public int LightmapChannel;              // the UV channel of its lightmap layout, 0 if none
         public bool LightmapInRange;             // it has one, and that layout stays within 0-1
         public bool FlipWinding;
+        public BoxSphereBounds Bounds;           // the StaticMesh's own, in its local space
         public MaterialBuilder[] SectionMaterials; // per LOD element, from the mesh's own package; null = not drawn
 
         // The same geometry drawn with other section materials (particle meshes keep additive ones).
@@ -992,6 +993,13 @@ public partial class LevelBuilder
                 extras["lightmap_uv"] = false;
             if (mover != null)
                 extras["me_mover"] = mover;
+            // UE3's ObjectWorldPositionAndRadius, for the shaders that read it: the mesh's bounds
+            // moved by the instance and padded by 1 cm, as StaticMeshComponent::UpdateBounds does.
+            if (own.Any(m => Reads(m, "object_bounds")))
+            {
+                BoxSphereBounds bounds = geometry.Bounds.TransformBy(world);
+                extras["me_bounds"] = new JsonArray(bounds.Origin.X, bounds.Origin.Y, bounds.Origin.Z, bounds.SphereRadius + 1f);
+            }
             var node = new NodeBuilder(name, extras);
             packageNode.AddNode(node);
             node.LocalMatrix = UnrealTransform.ToGltf(world);
@@ -1264,6 +1272,7 @@ public partial class LevelBuilder
             LightmapChannel = lightmapChannel,
             LightmapInRange = inRange,
             FlipWinding = MeshCommand.ShouldFlipWinding(wideIndices, gltfPositions, normals),
+            Bounds = mesh.Bounds,
             // A mesh from another package (an effect's) gets its materials from its caller.
             SectionMaterials = textures.Package == pcc
                 ? lod.Elements.Select(e => DrawnMaterial(textures, e.Material, $"{meshExport.ObjectName.Instanced}_mat{e.MaterialIndex}")).ToArray()
@@ -1293,10 +1302,38 @@ public partial class LevelBuilder
     private static IMeshBuilder<MaterialBuilder> BuildRender(MeshGeometry g, int[] overrides, TextureCache textures,
         int uv2, byte[] samples) => BuildRender(g, SectionMaterials(g, overrides, textures), uv2, samples);
 
-    // The same with each section's material already chosen (null: not drawn).
+    // The same with each section's material already chosen (null: not drawn). A mesh whose
+    // materials read UV channels 2 and 3 (in_uv_extra) carries them too: in TEXCOORD_2/3
+    // (Godot's CUSTOM0), or on a vertex-lit mesh, whose CUSTOM0 holds its directional samples,
+    // in TEXCOORD_4/5 (CUSTOM1).
     private static IMeshBuilder<MaterialBuilder> BuildRender(MeshGeometry g, MaterialBuilder[] materials, int uv2, byte[] samples)
     {
         int count = g.GltfPositions.Length;
+        if (materials.Any(m => Reads(m, "in_uv_extra")))
+        {
+            // UE3 hands a material reading past the mesh's last channel that last channel.
+            Vector2[] channel2 = g.UVs[Math.Min(2, g.UVs.Length - 1)];
+            Vector2[] channel3 = g.UVs[Math.Min(3, g.UVs.Length - 1)];
+            if (samples == null)
+            {
+                var extra = new VERTEX_LIT[count];
+                for (int v = 0; v < count; v++)
+                {
+                    extra[v] = new VERTEX_LIT(new VertexPositionNormalTangent(g.GltfPositions[v], g.Normals[v], g.Tangents[v]),
+                        new VertexColor1Texture4(Vector4.One, g.UVs[0][v], g.UVs[uv2][v], channel2[v], channel3[v]));
+                }
+                return AddSections(new MeshBuilder<VertexPositionNormalTangent, VertexColor1Texture4, VertexEmpty>(g.Name), extra, g, materials);
+            }
+            var litExtra = new VertexBuilder<VertexPositionNormalTangent, VertexMerged, VertexEmpty>[count];
+            for (int v = 0; v < count; v++)
+            {
+                Vector4 directional = Unit(samples, v * 8 + 4);
+                litExtra[v] = new(new VertexPositionNormalTangent(g.GltfPositions[v], g.Normals[v], g.Tangents[v]),
+                    new VertexMerged(Unit(samples, v * 8), g.UVs[0][v], g.UVs[uv2][v], new Vector2(directional.X, directional.Y),
+                        new Vector2(directional.Z, 0f), channel2[v], channel3[v], Vector2.Zero));
+            }
+            return AddSections(new MeshBuilder<VertexPositionNormalTangent, VertexMerged, VertexEmpty>(g.Name), litExtra, g, materials);
+        }
         if (samples == null)
         {
             var vertices = new VERTEX[count];
