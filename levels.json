@@ -1,5 +1,5 @@
 {
-  "version": 24,
+  "version": 25,
   "levels": [
     {
       "id": "wards",
@@ -10,6 +10,7 @@
       "music_volumes": "ME1/BIOA_STA00.pcc",
       "stream_volumes": "ME1/BIOA_STA00.pcc",
       "markers": { "package": "ME1/BIOA_STA00.pcc", "tags": "start_sta60_*" },
+      "transit": { "package": "ME1/BIOA_STA00.pcc", "tags": "stage_callCab?" },
       "npcs": "*_amb_*,Keeper",
       "packages": [
         "ME1/BIOA_STA60_??_LAY.pcc",

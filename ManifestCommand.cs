@@ -182,6 +182,9 @@ public static class ManifestCommand
         // Start markers from another package (the location's persistent level), by tag.
         if (entry.TryGetProperty("markers", out JsonElement markers))
             args.AddRange(["--markers", markers.GetProperty("package").GetString(), markers.GetProperty("tags").GetString()]);
+        // The Rapid Transit's arrival stages, likewise.
+        if (entry.TryGetProperty("transit", out JsonElement transit))
+            args.AddRange(["--transit", transit.GetProperty("package").GetString(), transit.GetProperty("tags").GetString()]);
         // Ambient NPCs, by Tag.
         if (entry.TryGetProperty("npcs", out JsonElement npcs))
             args.AddRange(["--npcs", npcs.GetString()]);

@@ -63,6 +63,8 @@ public static class LevelCommand
     // "--max-texture <px>" (largest texture side to embed, default 1024; 0 = full size), and
     // "--markers <package> <tag pattern>" (start locations from another package, usually the
     // persistent level that holds a whole location's, e.g. ME1/BIOA_STA00.pcc start_sta60_*),
+    // "--transit <package> <tag pattern>" (the Rapid Transit's arrival stages, likewise, e.g.
+    // ME1/BIOA_STA00.pcc stage_callCab?),
     // "--sounds <dir>" (where placeables' and ambient sounds go; default: the .glb's folder),
     // "--npcs <tag patterns>" (comma-separated BioPawn Tags to export as NPCs, e.g. *_amb_*,Keeper),
     // and "--music-volumes <package> <MusicIDs>" (the BioMusicVolumes of another package, usually
@@ -77,6 +79,7 @@ public static class LevelCommand
         LevelBuilder.DroppedSections.Clear();
         var patterns = new List<string>();
         var markerSources = new List<(string Package, string Tags)>();
+        var transitSources = new List<(string Package, string Tags)>();
         var musicSources = new List<(string Package, string[] Ids)>();
         var streamSources = new List<string>();
         string npcs = null;
@@ -93,6 +96,8 @@ public static class LevelCommand
                 soundsDir = args[++i];
             else if (args[i] == "--markers" && i + 2 < args.Length)
                 markerSources.Add((args[++i], args[++i]));
+            else if (args[i] == "--transit" && i + 2 < args.Length)
+                transitSources.Add((args[++i], args[++i]));
             else if (args[i] == "--music-volumes" && i + 2 < args.Length)
                 musicSources.Add((args[++i], args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
             else if (args[i] == "--stream-volumes" && i + 1 < args.Length)
@@ -127,6 +132,11 @@ public static class LevelCommand
         {
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(package).First());
             builder.AddMarkers(pcc, tags);
+        }
+        foreach ((string package, string tags) in transitSources)
+        {
+            using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(package).First());
+            builder.AddTransitStages(pcc, tags);
         }
         foreach ((string package, string[] ids) in musicSources)
         {
@@ -434,6 +444,33 @@ public partial class LevelBuilder
                 AddMarker(actor, props, UnrealTransform.ActorToWorld(props));
         }
         Console.WriteLine($"{Path.GetFileNameWithoutExtension(pcc.FilePath)}: {_markerCount - before} start markers matching {tagPattern}.");
+    }
+
+    // The Rapid Transit's arrival points: BioStages whose Tag matches (ME1's CitadelCabService
+    // Kismet finds stage_callCab0..9 by tag and teleports the player onto one). They go under
+    // Markers/ like the start locations, marked "transit_stage" so the game can tell them apart.
+    // A location's stages all sit in its persistent level, so every level of it gets all of them;
+    // the game keeps those near its own kiosks.
+    public void AddTransitStages(IMEPackage pcc, string tagPattern)
+    {
+        ExportEntry levelExport = pcc.Exports.FirstOrDefault(e => e.ClassName == "Level");
+        if (levelExport == null)
+            return;
+        int count = 0;
+        foreach (int actorIndex in ObjectBinary.From<Level>(levelExport).Actors)
+        {
+            if (actorIndex == 0 || !pcc.TryGetUExport(actorIndex, out ExportEntry actor) || actor.ClassName != "BioStage")
+                continue;
+            PropertyCollection props = actor.GetProperties();
+            string tag = StartTag(actor, props);
+            if (!FileSystemName.MatchesSimpleExpression(tagPattern, tag, ignoreCase: true))
+                continue;
+            var node = new NodeBuilder(tag, new JsonObject { ["transit_stage"] = new JsonObject { ["tag"] = tag } });
+            _markers.AddNode(node);
+            node.LocalMatrix = UnrealTransform.ToGltf(UnrealTransform.WithoutScale(UnrealTransform.ActorToWorld(props)));
+            count++;
+        }
+        Console.WriteLine($"{Path.GetFileNameWithoutExtension(pcc.FilePath)}: {count} transit stages matching {tagPattern}.");
     }
 
     // Start actors are found by Tag (what ME1's level transitions name), else by object name.

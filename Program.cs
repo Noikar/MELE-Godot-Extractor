@@ -106,6 +106,7 @@ public static class Program
                 "vfx" when args.Length >= 3 => VfxCommand.Run(args[1], args[2]),
                 "shaders" when args.Length >= 3 => ShadersCommand.Run(args[1], args[2..]),
                 "2da" when args.Length >= 3 => TableCommand.Run(args[1], args[2]),
+                "conversation" when args.Length >= 3 => ConversationCommand.Run(args[1], args[2]),
                 "isb" when args.Length >= 2 => IsbCommand.Run(args[1], args.Length >= 3 && args[2] != "-" ? args[2] : null,
                     args.Length >= 4 ? args[3] : null),
                 "streambank" when args.Length >= 3 => StreamBankCommand.Run(args[1], args[2], args.Contains("--raw")),
@@ -148,6 +149,8 @@ public static class Program
                   meshes under a "Collision" node. Textures are capped at 1024 px by default.
                   --markers adds another package's start locations whose Tag matches,
                   e.g. --markers ME1/BIOA_STA00.pcc start_sta60_*
+                  --transit adds another package's Rapid Transit stages (BioStages) whose Tag
+                  matches, e.g. --transit ME1/BIOA_STA00.pcc stage_callCab?
 
               find <folder> <file glob> <class> <filter>
                   Searches every package matching the glob for exports of <class> whose path
