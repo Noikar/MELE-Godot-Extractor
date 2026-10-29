@@ -571,12 +571,14 @@ public class TextureCache
     }
 
     // Packages the game always has loaded, which hold shared effect textures that other
-    // packages import: ME1's BIOC_Materials (the holograms', distortion maps) and SFXGame
-    // (BIOG_V_Z_TEXTURES_A_Z: the Citadel fountains' water); ME3's SFXGame and Startup
+    // packages import: ME1's BIOC_Materials (the holograms', distortion maps), SFXGame
+    // (BIOG_V_Z_TEXTURES_A_Z: the Citadel fountains' water), and SFXVehicleResources
+    // (FXT_ME1_DotTile_METR: the fountains' mist); ME3's SFXGame and Startup
     // (BioVFX_Z_TEXTURES: the powers' gradients and noise), and ME2's SFXGame.
+    // Searched in order, so a package added last only fills what the others don't hold.
     private static readonly Dictionary<MEGame, string[]> SharedPackages = new()
     {
-        [MEGame.LE1] = ["BIOC_Materials.pcc", "SFXGame.pcc"],
+        [MEGame.LE1] = ["BIOC_Materials.pcc", "SFXGame.pcc", "SFXVehicleResources.pcc"],
         [MEGame.LE2] = ["SFXGame.pcc"],
         [MEGame.LE3] = ["SFXGame.pcc", "Startup.pcc"],
     };
