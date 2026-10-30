@@ -290,7 +290,13 @@ public class TextureCache
                 shading += AddTranslatedShader(builder, baseMaterial, material, textures, colors, scalars, alphas, UnlitPolicies);
         }
         else if (unlit)
+        {
+            // Unlit opaque and cut-out surfaces (the Presidium's trees, the skyline) light
+            // themselves in their shader, so in ORIGINAL mode that shader draws them.
             shading = ", unlit";
+            if (CarriedTextures != null && baseMaterial != null)
+                shading += AddTranslatedShader(builder, baseMaterial, material, textures, colors, scalars, alphas, UnlitPolicies);
+        }
         else if (BakeShaders && material != null)
         {
             // The shader's own normal, else the material's normal map by name; roughness
