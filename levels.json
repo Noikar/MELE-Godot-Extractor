@@ -22,6 +22,47 @@
         "ME1/BIOA_STA60_???_DSG.pcc",
         "ME1/BIOA_STA60_09casino_DSG.pcc"
       ]
+    },
+    {
+      "id": "presidium",
+      "label": "Citadel Presidium",
+      "map": "Presidium",
+      "note": "ME1 BIOA_STA20 sublevels. Geometry is in _LAY, _ART, and _PLC; blocking volumes are in the base _DSG. The lettered _DSG variants are separate rooms (none puts a prop where another does): the ring's quarters (02A-D), the shops (04A), the Consort's waiting room (04C), the embassies (07A, 10A, 10D), the lounge (09A); 01A and 04B are empty. The cutscene sets (10B, 10C, 10E) and the named plot-state variants (02statue, 06consort, 10udina) were judged in game and kept. The crowd is tagged sta20_presidium_*, sta20_lounge_*, and sta20_amb_*, plus the Keepers and generic staff (the Consort's acolytes and clients, the embassy diplomats); named and quest characters are left out. The Citadel Tower elevator car (with its door, console, and lights; not the shaft) is borrowed from BIOA_STA70_01_PLC, where ME1 keeps it, parked at the Presidium's Tower corridor.",
+      "music": ["Presidium"],
+      "music_volumes": "ME1/BIOA_STA00.pcc",
+      "stream_volumes": "ME1/BIOA_STA00.pcc",
+      "markers": { "package": "ME1/BIOA_STA00.pcc", "tags": "start_sta20_*" },
+      "transit": { "package": "ME1/BIOA_STA00.pcc", "tags": "stage_callCab?" },
+      "npcs": "sta20_presidium_*,sta20_lounge_*,sta20_amb_*,Keeper,sta20_asari_employee*,sta20_asari_client*,sta20_gigolo*,sta20_female_diplomat,sta20_male_diplomat,sta20_elcor_diplomat",
+      "collision_bounds": { "min": [-125, -45, -145], "max": [140, 80, 225] },
+      "borrow": [
+        { "package": "ME1/BIOA_STA70_01_PLC.pcc", "actors": "InterpActor_11,BioDoor_13,BioUseable_24,BioInert_0,BioStage_5,SpotLightMovable_4,SpotLightMovable_5,SpotLightMovable_6,PointLight_136" }
+      ],
+      "packages": [
+        "ME1/BIOA_STA20_??_LAY.pcc",
+        "ME1/BIOA_STA20_??_ART.pcc",
+        "ME1/BIOA_STA20_??_PLC.pcc",
+        "ME1/BIOA_STA20_??_DSG.pcc",
+        "ME1/BIOA_STA20_??_SND.pcc",
+        "ME1/BIOA_STA20_01A_DSG.pcc",
+        "ME1/BIOA_STA20_02A_DSG.pcc",
+        "ME1/BIOA_STA20_02B_DSG.pcc",
+        "ME1/BIOA_STA20_02C_DSG.pcc",
+        "ME1/BIOA_STA20_02D_DSG.pcc",
+        "ME1/BIOA_STA20_04A_DSG.pcc",
+        "ME1/BIOA_STA20_04B_DSG.pcc",
+        "ME1/BIOA_STA20_04C_DSG.pcc",
+        "ME1/BIOA_STA20_07A_DSG.pcc",
+        "ME1/BIOA_STA20_09A_DSG.pcc",
+        "ME1/BIOA_STA20_10A_DSG.pcc",
+        "ME1/BIOA_STA20_10D_DSG.pcc",
+        "ME1/BIOA_STA20_10B_DSG.pcc",
+        "ME1/BIOA_STA20_10C_DSG.pcc",
+        "ME1/BIOA_STA20_10E_DSG.pcc",
+        "ME1/BIOA_STA20_02statue_DSG.pcc",
+        "ME1/BIOA_STA20_06consort_DSG.pcc",
+        "ME1/BIOA_STA20_10udina_DSG.pcc"
+      ]
     }
   ]
 }

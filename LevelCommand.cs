@@ -73,7 +73,10 @@ public static class LevelCommand
     // persistent level, that show the level's chunks; see LevelAudio.cs), "--merge-cell <m>"
     // (the merged chunks' world cell size in meters, default 32; 0 leaves every mesh separate),
     // and "--collision-bounds <min x,y,z> <max x,y,z>" (the playable area in glTF space, meters;
-    // collision entirely outside it is dropped, see LevelBuilder.CollisionBounds).
+    // collision entirely outside it is dropped, see LevelBuilder.CollisionBounds), and
+    // "--borrow <package> <actor patterns>" (only the comma-separated actors of another package,
+    // wildcards allowed: ME1 keeps an elevator car in the package of the area it serves, so the
+    // Presidium borrows the Citadel Tower's car from BIOA_STA70_01_PLC; repeatable).
     // steps reports each package read, the build, and the save (and laterSteps more the caller
     // runs after it, such as the music) for the game's progress bar.
     public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
@@ -84,6 +87,7 @@ public static class LevelCommand
         var transitSources = new List<(string Package, string Tags)>();
         var musicSources = new List<(string Package, string[] Ids)>();
         var streamSources = new List<string>();
+        var borrowSources = new List<(string Package, string[] Actors)>();
         string npcs = null;
         int maxTexture = 1024;
         float mergeCell = LevelBuilder.DefaultMergeCell;
@@ -109,6 +113,8 @@ public static class LevelCommand
                 npcs = args[++i];
             else if (args[i] == "--collision-bounds" && i + 2 < args.Length)
                 collisionBounds = (ParseVector(args[++i]), ParseVector(args[++i]));
+            else if (args[i] == "--borrow" && i + 2 < args.Length)
+                borrowSources.Add((args[++i], args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
             else
                 patterns.Add(args[i]);
         }
@@ -122,7 +128,7 @@ public static class LevelCommand
 
         var builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell, CollisionBounds = collisionBounds, Steps = steps };
         if (steps != null)
-            steps.Total = files.Length + 2 + laterSteps;
+            steps.Total = files.Length + borrowSources.Count + 2 + laterSteps;
         if (npcs != null)
             builder.AddPawnPatterns(npcs);
         for (int f = 0; f < files.Length; f++)
@@ -131,6 +137,17 @@ public static class LevelCommand
             Console.WriteLine($"Reading {f + 1}/{files.Length} {Path.GetFileNameWithoutExtension(files[f])}");
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(files[f]);
             builder.AddPackage(pcc);
+            ShaderAnalysis.Forget(pcc);
+        }
+        // Borrowed actors keep their own package's name, so their placeables, collision, and
+        // lights' level restrictions read as they do in ME1.
+        foreach ((string package, string[] actors) in borrowSources)
+        {
+            string file = ExpandPackages(package).First();
+            steps?.Next($"Reading {Path.GetFileNameWithoutExtension(file)}");
+            Console.WriteLine($"Borrowing from {Path.GetFileNameWithoutExtension(file)}");
+            using IMEPackage pcc = MEPackageHandler.OpenMEPackage(file);
+            builder.AddPackage(pcc, actors);
             ShaderAnalysis.Forget(pcc);
         }
         foreach ((string package, string tags) in markerSources)
@@ -290,7 +307,8 @@ public partial class LevelBuilder
         _scene.AddNode(_root);
     }
 
-    public void AddPackage(IMEPackage pcc)
+    // only: when set, just the actors whose name matches one of these patterns (--borrow).
+    public void AddPackage(IMEPackage pcc, string[] only = null)
     {
         string packageName = Path.GetFileNameWithoutExtension(pcc.FilePath);
         ExportEntry levelExport = pcc.Exports.FirstOrDefault(e => e.ClassName == "Level");
@@ -318,12 +336,23 @@ public partial class LevelBuilder
         _movers = FindMovers(pcc);
         // Decals go last: they draw on their receivers, which may come later in the actor list.
         var decals = new List<(ExportEntry Actor, ExportEntry Component)>();
+        var borrowed = new List<string>();
+        var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         var level = ObjectBinary.From<Level>(levelExport);
         foreach (int actorIndex in level.Actors)
         {
             if (actorIndex == 0 || !pcc.TryGetUExport(actorIndex, out ExportEntry actor))
                 continue;
+            if (only != null)
+            {
+                string actorName = actor.ObjectName.Instanced;
+                string[] hits = only.Where(p => FileSystemName.MatchesSimpleExpression(p, actorName, ignoreCase: true)).ToArray();
+                if (hits.Length == 0)
+                    continue;
+                matched.UnionWith(hits);
+                borrowed.Add(actorName);
+            }
             try
             {
                 if (actor.GetProperties().GetProp<ObjectProperty>("Decal") is ObjectProperty decalProp
@@ -357,6 +386,12 @@ public partial class LevelBuilder
 
         Console.WriteLine($"{packageName}: {_instances - instancesBefore} mesh instances, {_lightCount - lightsBefore} lights, "
             + $"{_hullCount - hullsBefore} hulls, {_trimeshTriangles - trisBefore} collision triangles.");
+        if (only != null)
+        {
+            Console.WriteLine($"Borrowed {borrowed.Count} actors from {packageName}: {string.Join(", ", borrowed)}");
+            foreach (string pattern in only.Where(p => !matched.Contains(p)))
+                Console.Error.WriteLine($"  warning: no actor in {packageName} matches {pattern}");
+        }
     }
 
     private void AddActor(IMEPackage pcc, ExportEntry actor, NodeBuilder packageNode, TextureCache textures,

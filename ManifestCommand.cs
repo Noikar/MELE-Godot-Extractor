@@ -211,6 +211,12 @@ public static class ManifestCommand
                 .Select(v => v.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)));
             args.AddRange(["--collision-bounds", Corner("min"), Corner("max")]);
         }
+        // Actors borrowed from other packages: [{ "package": ..., "actors": "<comma-separated names>" }].
+        if (entry.TryGetProperty("borrow", out JsonElement borrow))
+        {
+            foreach (JsonElement source in borrow.EnumerateArray())
+                args.AddRange(["--borrow", source.GetProperty("package").GetString(), source.GetProperty("actors").GetString()]);
+        }
         var steps = new EntrySteps();
         if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray(), steps, laterSteps: musicIds.Length > 0 ? 1 : 0) != 0)
             throw new InvalidOperationException("level export returned an error");

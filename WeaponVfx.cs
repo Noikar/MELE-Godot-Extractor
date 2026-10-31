@@ -14,7 +14,7 @@ namespace LexExport;
 //
 // So far only the sounds are exported (beside the .glb, through SoundExport): "fire" (the primary
 // muzzle flash's cue) and "impact" (the default visual impact's cue). The particle systems are the
-// next step (Documentation/handoff-combat-shooting.md).
+// next step.
 public static class WeaponVfx
 {
     public static JsonObject Export(IMEPackage pcc, string appearancePath, string outDir)
