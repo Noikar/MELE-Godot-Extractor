@@ -1712,11 +1712,14 @@ public partial class LevelBuilder
 
     // The textures the translated material shaders sample, carried like the lightmap pages:
     // MaterialTextures/Texture_<n>, with "material_texture" (its key) in the node's extras.
-    private void AddMaterialTextures()
+    private void AddMaterialTextures() => AddMaterialTextures(_scene, _root, _carriedTextures);
+
+    // The same under any node (an NPC look's PawnAsset root); returns how many it carried.
+    internal static int AddMaterialTextures(SceneBuilder scene, NodeBuilder parent, Dictionary<string, MemoryImage?> carriedTextures)
     {
-        NodeBuilder carrier = _root.CreateNode("MaterialTextures");
+        NodeBuilder carrier = parent.CreateNode("MaterialTextures");
         int count = 0;
-        foreach ((string key, MemoryImage? image) in _carriedTextures.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        foreach ((string key, MemoryImage? image) in carriedTextures.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
         {
             if (!image.HasValue)
                 continue;
@@ -1729,9 +1732,10 @@ public partial class LevelBuilder
                 new(new VertexPosition(0f, 0f, 0.01f), new VertexTexture1(new Vector2(0f, 1f))));
             NodeBuilder node = new NodeBuilder(name, new JsonObject { ["material_texture"] = key });
             carrier.AddNode(node);
-            _scene.AddRigidMesh(mesh, node);
+            scene.AddRigidMesh(mesh, node);
         }
         Console.WriteLine($"Material textures: {count} carried for the translated shaders.");
+        return count;
     }
 
     // A StaticMesh's simplified collision (its RB_BodySetup's AggGeom), as point sets in

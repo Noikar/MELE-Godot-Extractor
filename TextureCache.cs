@@ -35,6 +35,15 @@ public class TextureCache
     // specular map.
     public bool SurfaceShading { get; init; }
 
+    // NPC looks: unlit additive materials (the VI holograms) also carry their original shader,
+    // translated, over the bake (which stays as the fallback), with their textures collected in
+    // CarriedTextures, as level surfaces do.
+    public bool TranslateAdditive { get; init; }
+
+    // The vertex factory whose compiled shaders AddTranslatedShader reads: level surfaces and
+    // effects are FLocalVertexFactory, characters FGPUSkinVertexFactory.
+    public string VertexFactory { get; init; } = "FLocalVertexFactory";
+
     // Level surfaces: when set, lit materials also carry their original shader, translated
     // (AddTranslatedShader), and the textures it samples are collected here by key for the
     // level to embed. Shared across packages, like the images.
@@ -243,7 +252,8 @@ public class TextureCache
             alphaMask = true;
         if (baseProps?.GetProp<BoolProperty>("TwoSided")?.Value == true)
             builder.WithDoubleSide(true);
-        bool unlit = SurfaceShading && baseProps?.GetProp<EnumProperty>("LightingModel")?.Value.Instanced == "MLM_Unlit";
+        bool unlit = (SurfaceShading || TranslateAdditive && blendMode == "BLEND_Additive")
+            && baseProps?.GetProp<EnumProperty>("LightingModel")?.Value.Instanced == "MLM_Unlit";
         if (unlit)
             builder.WithUnlitShader();
 
@@ -274,6 +284,11 @@ public class TextureCache
             builder.WithBaseColor(new Vector4(0.6f, 0.6f, 0.6f, 1f));
         if (alphaMask)
             builder.WithAlpha(AlphaMode.MASK, 0.5f).WithDoubleSide(true);
+        // A masked material with nothing in its opacity mask is never drawn (Avina's eyelashes):
+        // cut it out entirely rather than draw the gray stand-in.
+        bool hidden = alphaMask && recipe != "shader" && material != null && baseMaterial != null && AlwaysDiscards(material, baseMaterial);
+        if (hidden)
+            builder.WithBaseColor(Vector4.Zero);
 
         if (translucent)
         {
@@ -322,6 +337,7 @@ public class TextureCache
             : diffuse != null ? "diffuse " + diffuse.ObjectName.Instanced
             : "no diffuse found";
         Console.WriteLine($"  material {builder.Name}: {source}" + (blendMode != "BLEND_Opaque" ? $" ({blendMode})" : "") + shading
+            + (hidden ? ", always discarded (hidden)" : "")
             + (textures.Count > 0 ? $"  [params: {string.Join(", ", textures.Keys)}]" : ""));
         _materials[key] = builder;
         return builder;
@@ -636,6 +652,22 @@ public class TextureCache
         return note;
     }
 
+    // Whether a material's compiled base-pass shader discards every pixel (an unconditional
+    // discard: a masked material whose opacity mask is unconnected, so 0, under its clip value).
+    private bool AlwaysDiscards(ExportEntry material, ExportEntry baseMaterial)
+    {
+        ShaderCache cache = SharedShaders ? ShaderAnalysis.CacheWithShared(_pcc) : ShaderAnalysis.CacheOf(_pcc);
+        MaterialShaderMap map = cache != null ? ShaderAnalysis.ShaderMapOf(cache, material, baseMaterial, out _, out _, out _) : null;
+        ShaderReference reference = map?.MeshShaderMaps
+            .Where(m => m.VertexFactoryType.Instanced == VertexFactory)
+            .SelectMany(m => m.Shaders)
+            .FirstOrDefault(s => s.Key.Instanced.StartsWith("TBasePassPixelShader", StringComparison.Ordinal)).Value;
+        if (reference == null || !cache.Shaders.TryGetValue(reference.Id, out Shader shader))
+            return false;
+        string asm = ShaderAnalysis.Disassemble(shader.ShaderByteCode);
+        return asm != null && asm.Contains("discard_nz l(-1)");
+    }
+
     // Translates a lit material's original base-pass shaders, one per lightmap policy
     // (ShaderTranslator), into the material's "me_material" extras, along with what they read:
     //   texture_<n>: the key of a carried texture (CarriedTextures), decoded as-is
@@ -700,7 +732,7 @@ public class TextureCache
         {
             string type = ShaderTranslator.ShaderType(policy);
             ShaderReference reference = map.MeshShaderMaps
-                .Where(m => m.VertexFactoryType.Instanced == "FLocalVertexFactory")
+                .Where(m => m.VertexFactoryType.Instanced == VertexFactory)
                 .SelectMany(m => m.Shaders)
                 .FirstOrDefault(s => s.Key.Instanced == type).Value;
             string key = ShaderTranslator.Key(policy);

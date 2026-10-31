@@ -9,6 +9,7 @@ using LegendaryExplorerCore.Unreal.BinaryConverters;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
+using SharpGLTF.Memory;
 using SharpGLTF.Scenes;
 using BioMorphFace = LegendaryExplorerCore.Unreal.Classes.BioMorphFace;
 
@@ -47,7 +48,7 @@ public partial class LevelBuilder
 
     // Part of every look's hash: bump it when an exporter change alters looks, so players'
     // games bake them again.
-    private const int LookVersion = 2;
+    private const int LookVersion = 3;
 
     private readonly List<string> _pawnPatterns = new();
     private NodeBuilder _pawnsNode;
@@ -391,13 +392,26 @@ public partial class LevelBuilder
         SceneBuilder scene = new SceneBuilder();
         scene.AddNode(assetNode);
 
-        TextureCache textures = new TextureCache(pcc, []) { BakeShaders = true, ResolveImports = true, MaxTextureSize = PawnTextureSize };
+        // VI holograms (Avina) draw with their translated shader; the textures it samples go
+        // under the PawnAsset root, as a level carries its own (LevelPawns.gd puts them on).
+        Dictionary<string, MemoryImage?> carried = new(StringComparer.OrdinalIgnoreCase);
+        TextureCache textures = new TextureCache(pcc, [])
+        {
+            BakeShaders = true,
+            ResolveImports = true,
+            MaxTextureSize = PawnTextureSize,
+            TranslateAdditive = true,
+            VertexFactory = "FGPUSkinVertexFactory",
+            CarriedTextures = carried,
+        };
         if (look.FaceOverride != null)
             textures.AddOverrides(look.FaceOverride);
         if (look.TypeOverride != null)
             textures.AddOverrides(look.TypeOverride, keepSkinTone: true);
         foreach ((string partName, SkeletalMesh mesh) in look.Parts)
             scene.AddSkinnedMesh(MeshCommand.BuildMesh($"{name}_{partName}", mesh, skeleton, textures), Matrix4x4.Identity, joints);
+        if (carried.Values.Any(image => image.HasValue))
+            AddMaterialTextures(scene, assetNode, carried);
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         SharpGLTF.Schema2.ModelRoot model = scene.ToGltf2(Program.GltfSettings);
