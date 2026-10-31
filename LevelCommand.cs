@@ -416,7 +416,7 @@ public partial class LevelBuilder
             for (int i = 0; i < collection.Components.Count; i++)
             {
                 if (pcc.TryGetUExport(collection.Components[i], out ExportEntry component))
-                    AddLight(component, collection.LocalToWorldTransforms[i]);
+                    AddLight(component, collection.LocalToWorldTransforms[i], actor);
             }
             return;
         }
@@ -450,7 +450,7 @@ public partial class LevelBuilder
         else if (props.GetProp<ObjectProperty>("LightComponent") is ObjectProperty lightProp
             && pcc.TryGetUExport(lightProp.Value, out ExportEntry lightComponent))
         {
-            AddLight(lightComponent, UnrealTransform.WithoutScale(actorToWorld));
+            AddLight(lightComponent, UnrealTransform.WithoutScale(actorToWorld), actor);
         }
         else if (props.GetProp<ObjectProperty>("ParticleSystemComponent") is ObjectProperty particleProp
             && pcc.TryGetUExport(particleProp.Value, out ExportEntry particleComponent))
@@ -559,6 +559,7 @@ public partial class LevelBuilder
         placeable["asset"] = SkeletalAsset(pcc, meshExport, componentProps, levelTextures);
         // Whether this one blocks at all; what blocks is its model's physics bodies.
         placeable["blocks"] = BlocksPlayer(props, componentProps);
+        AddActorLighting(pcc, actor, component, placeable, "m_pLightEnvComponent");
         // Actor names repeat across sublevels (BioDoor_21 is in two), and the game builds
         // networked nodes from these names, so they must be unique.
         string packageName = Path.GetFileNameWithoutExtension(pcc.FilePath);
@@ -1090,6 +1091,8 @@ public partial class LevelBuilder
                 extras["lightmap_uv"] = false;
             if (mover != null)
                 extras["me_mover"] = mover;
+            if (lighting["type"].GetValue<string>() == "none")
+                AddMeshLighting(pcc, actor, component, extras);
             // UE3's ObjectWorldPositionAndRadius, for the shaders that read it: the mesh's bounds
             // moved by the instance and padded by 1 cm, as StaticMeshComponent::UpdateBounds does.
             if (own.Any(m => Reads(m, "object_bounds")))
@@ -1753,7 +1756,7 @@ public partial class LevelBuilder
 
     // Unreal light components become KHR_lights_punctual lights. Intensities are only a
     // starting point; the raw Unreal values ride along in the node's extras for the loader.
-    private void AddLight(ExportEntry component, Matrix4x4 world)
+    private void AddLight(ExportEntry component, Matrix4x4 world, ExportEntry actor)
     {
         PropertyCollection props = component.GetProperties();
         if (props.GetProp<BoolProperty>("bEnabled")?.Value == false)
@@ -1776,6 +1779,8 @@ public partial class LevelBuilder
                 ["ue_color"] = new JsonArray(color.X, color.Y, color.Z),
                 ["ue_lower_brightness"] = props.GetProp<FloatProperty>("LowerBrightness")?.Value ?? 0f,
                 ["ue_lower_color"] = new JsonArray(lower.X, lower.Y, lower.Z),
+                ["ue_channels"] = LightChannels(component),
+                ["ue_dynamic"] = DynamicLight(component, actor),
             }));
             Console.WriteLine($"  sky light: brightness {brightness}, color {color}");
             return;
@@ -1826,6 +1831,8 @@ public partial class LevelBuilder
             ["ue_brightness"] = brightness,
             ["ue_radius"] = radius,
             ["ue_falloff"] = falloff,
+            ["ue_channels"] = LightChannels(component),
+            ["ue_dynamic"] = DynamicLight(component, actor),
         };
         // A light can be limited to its own level and the ones it names, e.g. the Wards' sky
         // directional (in _00_ART) only reaches the open areas 01, 02, 08, 09, and 10. ME1 names

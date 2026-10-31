@@ -129,6 +129,7 @@ public partial class LevelBuilder
         };
         if (settle)
             pawn["settle"] = true;
+        AddActorLighting(pcc, actor, body, pawn, "m_pLightEnvComponent");
         // The cylinder that blocks the player, centered on the actor's origin (UE3 pawns stand
         // at their cylinder's middle; the mesh hangs below it).
         if (pcc.TryGetUExport(InheritedProp<ObjectProperty>(actor, "CylinderComponent")?.Value ?? 0, out ExportEntry cylinder))
