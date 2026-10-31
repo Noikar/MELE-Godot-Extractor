@@ -56,8 +56,8 @@ public partial class LevelBuilder
             powerProps = power.GetProperties();
         }
 
-        var builder = new LevelBuilder(1024);
-        var textures = new TextureCache(pcc, new List<string>(), builder._materials, builder._images)
+        LevelBuilder builder = new LevelBuilder(1024);
+        TextureCache textures = new TextureCache(pcc, new List<string>(), builder._materials, builder._images)
         {
             MaxTextureSize = 1024,
             GuessDiffuse = true,
@@ -65,18 +65,18 @@ public partial class LevelBuilder
             CarriedTextures = builder._carriedTextures,
             SharedShaders = true,
         };
-        var parameters = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
+        Dictionary<string, float> parameters = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase)
         {
             ["Intensity"] = powerProps.GetProp<StructProperty>("VFXIntensity")?.GetProp<FloatProperty>("BaseValue")?.Value ?? 0f,
         };
         NodeBuilder effects = builder._root.CreateNode("Effects");
 
         // The power's four roles, then any other role the manifest names (the omni-tool's arm and hand).
-        var roles = EffectRoles.ToList();
+        List<(string Role, string Property)> roles = EffectRoles.ToList();
         foreach (JsonProperty named in vfx.EnumerateObject())
             if (named.Name != "power" && !roles.Any(r => r.Role == named.Name))
                 roles.Add((named.Name, null));
-        foreach (var (role, property) in roles)
+        foreach ((string role, string property) in roles)
         {
             ExportEntry template = vfx.TryGetProperty(role, out JsonElement named)
                 ? pcc.Exports.FirstOrDefault(e => e.InstancedFullPath.Equals(named.GetString(), StringComparison.OrdinalIgnoreCase))
@@ -100,7 +100,7 @@ public partial class LevelBuilder
     {
         Vector3 First(string name)
         {
-            var table = p.GetProp<StructProperty>(name)?.GetProp<ArrayProperty<FloatProperty>>("LookupTable");
+            ArrayProperty<FloatProperty> table = p.GetProp<StructProperty>(name)?.GetProp<ArrayProperty<FloatProperty>>("LookupTable");
             return table == null || table.Count < 5 ? Vector3.Zero : new Vector3(table[2].Value, table[3].Value, table[4].Value);
         }
         Vector3 move = First("m_LocationAdjust");
@@ -111,7 +111,7 @@ public partial class LevelBuilder
         float sr = MathF.Sin(turn.X), cr = MathF.Cos(turn.X);
         float sp = MathF.Sin(turn.Y), cp = MathF.Cos(turn.Y);
         float sy = MathF.Sin(turn.Z), cy = MathF.Cos(turn.Z);
-        var m = new Matrix4x4(
+        Matrix4x4 m = new Matrix4x4(
             cp * cy, cp * sy, sp, 0,
             sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp, 0,
             -(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp, 0,
@@ -130,8 +130,8 @@ public partial class LevelBuilder
     // An RvrClientEffect's modules (see the header), with its particle systems' assets added.
     private JsonObject ReadEffect(IMEPackage pcc, ExportEntry template, TextureCache textures, IReadOnlyDictionary<string, float> parameters)
     {
-        var modules = new JsonArray();
-        var left = new List<string>();
+        JsonArray modules = new JsonArray();
+        List<string> left = new List<string>();
         foreach (ObjectProperty moduleRef in template.GetProperties().GetProp<ArrayProperty<ObjectProperty>>("m_lstModules")
             ?? Enumerable.Empty<ObjectProperty>())
         {
@@ -141,7 +141,7 @@ public partial class LevelBuilder
             float F(string name, float fallback) => p.GetProp<FloatProperty>(name)?.Value ?? fallback;
             bool B(string name) => p.GetProp<BoolProperty>(name)?.Value == true;
             string N(string name) => p.GetProp<NameProperty>(name)?.Value.Instanced;
-            var json = new JsonObject
+            JsonObject json = new JsonObject
             {
                 ["tag"] = N("m_nmTag"),
                 ["duration"] = F("m_fDuration", 0f),
@@ -155,12 +155,12 @@ public partial class LevelBuilder
                     if (p.GetProp<ObjectProperty>("m_pParticleSystem") is not ObjectProperty systemRef
                         || !pcc.TryGetUExport(systemRef.Value, out ExportEntry system))
                         continue;
-                    var given = ModuleParameters(p);
-                    var all = new Dictionary<string, float>(parameters, StringComparer.OrdinalIgnoreCase);
-                    foreach (var (name, value) in given)
+                    Dictionary<string, float> given = ModuleParameters(p);
+                    Dictionary<string, float> all = new Dictionary<string, float>(parameters, StringComparer.OrdinalIgnoreCase);
+                    foreach ((string name, float value) in given)
                         all[name] = value;
-                    var notes = new List<string>();
-                    var emitters = new JsonArray();
+                    List<string> notes = new List<string>();
+                    JsonArray emitters = new JsonArray();
                     foreach (ParticleExport.Emitter emitter in ParticleExport.Read(pcc, system, notes, shared: true, all))
                     {
                         string asset = ParticleAsset(pcc, emitter, textures);
@@ -229,7 +229,7 @@ public partial class LevelBuilder
     // A module's m_aParameters: each named variable's face value.
     private static Dictionary<string, float> ModuleParameters(PropertyCollection p)
     {
-        var values = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, float> values = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         foreach (StructProperty entry in p.GetProp<ArrayProperty<StructProperty>>("m_aParameters") ?? Enumerable.Empty<StructProperty>())
         {
             StructProperty parameter = entry.GetProp<StructProperty>("Parameter");
@@ -251,7 +251,7 @@ public partial class LevelBuilder
         JsonObject Axes(string name, params string[] axes)
         {
             StructProperty group = p.GetProp<StructProperty>(name);
-            var json = new JsonObject();
+            JsonObject json = new JsonObject();
             foreach (string axis in axes)
                 json[axis.ToLowerInvariant()] = Oscillator(group?.GetProp<StructProperty>(axis));
             return json;

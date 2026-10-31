@@ -27,7 +27,7 @@ public static class StreamBankCommand
         ISACTBankPair pair = export.ClassName == "SoundNodeWave"
             ? ISACTHelper.GetPairedBanks(ObjectBinary.From<SoundNodeWave>(export).RawData)
             : ObjectBinary.From<BioSoundNodeWaveStreamingData>(export).BankPair;
-        foreach (var (label, bank) in new[] { ("ICB", pair.ICBBank), ("ISB", pair.ISBBank) })
+        foreach ((string label, ISACTBank bank) in new[] { ("ICB", pair.ICBBank), ("ISB", pair.ISBBank) })
         {
             if (bank == null)
                 continue;

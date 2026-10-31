@@ -118,8 +118,8 @@ Register both before loading a file:
 DdsExtension.ensure_registered()
 SpecularExtension.ensure_registered()
 
-var document := GLTFDocument.new()
-var state := GLTFState.new()
+var document: GLTFDocument = GLTFDocument.new()
+var state: GLTFState = GLTFState.new()
 if document.append_from_file(path, state) == OK:
 	var scene: Node = document.generate_scene(state)
 ```

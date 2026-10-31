@@ -1,9 +1,11 @@
+using System.Diagnostics;
 using System.IO.Enumeration;
 using System.Numerics;
 using System.Text.Json.Nodes;
 using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
 using LegendaryExplorerCore.Unreal.BinaryConverters;
+using LegendaryExplorerCore.Unreal.Classes;
 using SharpGLTF.Geometry;
 using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
@@ -85,12 +87,12 @@ public static class LevelCommand
     public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
     {
         LevelBuilder.DroppedSections.Clear();
-        var patterns = new List<string>();
-        var markerSources = new List<(string Package, string Tags)>();
-        var transitSources = new List<(string Package, string Tags)>();
-        var musicSources = new List<(string Package, string[] Ids)>();
-        var streamSources = new List<string>();
-        var borrowSources = new List<(string Package, string[] Actors, (Vector3, Vector3)? Clip)>();
+        List<string> patterns = new List<string>();
+        List<(string Package, string Tags)> markerSources = new List<(string Package, string Tags)>();
+        List<(string Package, string Tags)> transitSources = new List<(string Package, string Tags)>();
+        List<(string Package, string[] Ids)> musicSources = new List<(string Package, string[] Ids)>();
+        List<string> streamSources = new List<string>();
+        List<(string Package, string[] Actors, (Vector3, Vector3)? Clip)> borrowSources = new List<(string Package, string[] Actors, (Vector3, Vector3)? Clip)>();
         string npcs = null;
         int maxTexture = 1024;
         float mergeCell = LevelBuilder.DefaultMergeCell;
@@ -131,7 +133,7 @@ public static class LevelCommand
             return 1;
         }
 
-        var builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell, CollisionBounds = collisionBounds, Steps = steps };
+        LevelBuilder builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell, CollisionBounds = collisionBounds, Steps = steps };
         if (steps != null)
             steps.Total = files.Length + borrowSources.Count + 2 + laterSteps;
         if (npcs != null)
@@ -151,7 +153,7 @@ public static class LevelCommand
             string file = ExpandPackages(package).First();
             steps?.Next($"Reading {Path.GetFileNameWithoutExtension(file)}");
             Console.WriteLine($"Borrowing from {Path.GetFileNameWithoutExtension(file)}"
-                + (clip is var (clipMin, clipMax) ? $", clipped to {clipMin} .. {clipMax}" : ""));
+                + (clip is (Vector3 clipMin, Vector3 clipMax) ? $", clipped to {clipMin} .. {clipMax}" : ""));
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(file);
             builder.AddPackage(pcc, actors, clip);
             ShaderAnalysis.Forget(pcc);
@@ -171,7 +173,7 @@ public static class LevelCommand
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(package).First());
             builder.AddMusicVolumes(pcc, ids);
         }
-        var chunks = files.Select(f => LevelBuilder.Chunk(Path.GetFileNameWithoutExtension(f))).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> chunks = files.Select(f => LevelBuilder.Chunk(Path.GetFileNameWithoutExtension(f))).ToHashSet(StringComparer.OrdinalIgnoreCase);
         foreach (string package in streamSources)
         {
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(package).First());
@@ -225,7 +227,7 @@ public partial class LevelBuilder
         // The same geometry drawn with other section materials (particle meshes keep additive ones).
         public MeshGeometry WithMaterials(MaterialBuilder[] materials)
         {
-            var copy = (MeshGeometry)MemberwiseClone();
+            MeshGeometry copy = (MeshGeometry)MemberwiseClone();
             copy.SectionMaterials = materials;
             return copy;
         }
@@ -254,7 +256,7 @@ public partial class LevelBuilder
         // world: the instance's Unreal world matrix.
         public MeshGeometry Clipped(Matrix4x4 world, Vector3 boxMin, Vector3 boxMax)
         {
-            var copy = (MeshGeometry)MemberwiseClone();
+            MeshGeometry copy = (MeshGeometry)MemberwiseClone();
             Matrix4x4 toGltf = UnrealTransform.ToGltf(world);
             Vector3[] at = GltfPositions.Select(p => Vector3.Transform(p, toGltf)).ToArray();
             ushort[] indices = Lod.IndexBuffer;
@@ -395,7 +397,7 @@ public partial class LevelBuilder
             return;
         }
 
-        var textures = new TextureCache(pcc, new List<string>(), _materials, _images)
+        TextureCache textures = new TextureCache(pcc, new List<string>(), _materials, _images)
         {
             MaxTextureSize = _maxTexture,
             GuessDiffuse = true,
@@ -406,17 +408,17 @@ public partial class LevelBuilder
             SharedShaders = true,
         };
         NodeBuilder packageNode = _root.CreateNode(packageName);
-        var trimesh = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Trimesh_{packageName}");
-        var trimeshPrimitive = trimesh.UsePrimitive(_collisionMaterial);
+        MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty> trimesh = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Trimesh_{packageName}");
+        PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> trimeshPrimitive = trimesh.UsePrimitive(_collisionMaterial);
         int instancesBefore = _instances, lightsBefore = _lightCount, hullsBefore = _hullCount, trisBefore = _trimeshTriangles;
         _receivers.Clear();
         _movers = FindMovers(pcc);
         // Decals go last: they draw on their receivers, which may come later in the actor list.
-        var decals = new List<(ExportEntry Actor, ExportEntry Component)>();
-        var borrowed = new List<string>();
-        var matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        List<(ExportEntry Actor, ExportEntry Component)> decals = new List<(ExportEntry Actor, ExportEntry Component)>();
+        List<string> borrowed = new List<string>();
+        HashSet<string> matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        var level = ObjectBinary.From<Level>(levelExport);
+        Level level = ObjectBinary.From<Level>(levelExport);
         foreach (int actorIndex in level.Actors)
         {
             if (actorIndex == 0 || !pcc.TryGetUExport(actorIndex, out ExportEntry actor))
@@ -498,7 +500,7 @@ public partial class LevelBuilder
 
         if (cls == "StaticMeshCollectionActor")
         {
-            var collection = ObjectBinary.From<StaticMeshCollectionActor>(actor);
+            StaticMeshCollectionActor collection = ObjectBinary.From<StaticMeshCollectionActor>(actor);
             for (int i = 0; i < collection.Components.Count; i++)
             {
                 if (pcc.TryGetUExport(collection.Components[i], out ExportEntry component) && KeepsComponent(component))
@@ -508,7 +510,7 @@ public partial class LevelBuilder
         }
         if (cls == "StaticLightCollectionActor")
         {
-            var collection = ObjectBinary.From<StaticLightCollectionActor>(actor);
+            StaticLightCollectionActor collection = ObjectBinary.From<StaticLightCollectionActor>(actor);
             for (int i = 0; i < collection.Components.Count; i++)
             {
                 if (pcc.TryGetUExport(collection.Components[i], out ExportEntry component) && KeepsComponent(component))
@@ -615,7 +617,7 @@ public partial class LevelBuilder
             string tag = StartTag(actor, props);
             if (!FileSystemName.MatchesSimpleExpression(tagPattern, tag, ignoreCase: true))
                 continue;
-            var node = new NodeBuilder(tag, new JsonObject { ["transit_stage"] = new JsonObject { ["tag"] = tag } });
+            NodeBuilder node = new NodeBuilder(tag, new JsonObject { ["transit_stage"] = new JsonObject { ["tag"] = tag } });
             _markers.AddNode(node);
             node.LocalMatrix = UnrealTransform.ToGltf(UnrealTransform.WithoutScale(UnrealTransform.ActorToWorld(props)));
             count++;
@@ -661,7 +663,7 @@ public partial class LevelBuilder
         string packageName = Path.GetFileNameWithoutExtension(pcc.FilePath);
         // Which lights reach it (a light's "ue_levels").
         placeable["package"] = packageName;
-        var node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["placeable"] = placeable });
+        NodeBuilder node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["placeable"] = placeable });
         _placeablesNode.AddNode(node);
         node.LocalMatrix = UnrealTransform.ToGltf(UnrealTransform.ComponentToActor(componentProps) * actorToWorld);
         _skeletalPlaceables++;
@@ -684,7 +686,7 @@ public partial class LevelBuilder
         pcc.TryGetUExport(props.GetProp<ObjectProperty>("m_oBehavior")?.Value ?? 0, out ExportEntry behavior);
         PropertyCollection type = Props(behavior == null ? 0 : InheritedProp<ObjectProperty>(behavior, "m_oActorType")?.Value ?? 0);
         PropertyCollection appearance = Props(type?.GetProp<ObjectProperty>("m_oApperance")?.Value ?? 0);
-        var effects = appearance?.GetProp<ArrayProperty<StructProperty>>("VisualEffects");
+        ArrayProperty<StructProperty> effects = appearance?.GetProp<ArrayProperty<StructProperty>>("VisualEffects");
         if (effects == null)
             return;
 
@@ -703,8 +705,8 @@ public partial class LevelBuilder
                 || !pcc.TryGetUExport(prefabRef.Value, out ExportEntry prefab))
                 continue;
 
-            var spawn = new JsonArray();
-            var death = new JsonArray();
+            JsonArray spawn = new JsonArray();
+            JsonArray death = new JsonArray();
             foreach (StructProperty state in effects[i].Properties.GetProp<ArrayProperty<StructProperty>>("m_States") ?? Enumerable.Empty<StructProperty>())
             {
                 string name = state.Properties.GetProp<NameProperty>("m_nmAPLState")?.Value.Instanced;
@@ -718,7 +720,7 @@ public partial class LevelBuilder
             if (spawn.Count == 0)
                 continue;
 
-            var group = new NodeBuilder($"{placeableName}_vfx{i}", new JsonObject
+            NodeBuilder group = new NodeBuilder($"{placeableName}_vfx{i}", new JsonObject
             {
                 ["placeable_vfx"] = new JsonObject
                 {
@@ -730,7 +732,7 @@ public partial class LevelBuilder
                 },
             });
             int meshes = 0;
-            var leftOut = new List<string>();
+            List<string> leftOut = new List<string>();
             foreach (ObjectProperty memberRef in prefab.GetProperties().GetProp<ArrayProperty<ObjectProperty>>("PrefabArchetypes") ?? Enumerable.Empty<ObjectProperty>())
             {
                 if (!pcc.TryGetUExport(memberRef.Value, out ExportEntry member))
@@ -793,18 +795,18 @@ public partial class LevelBuilder
             name += "_" + _skeletalAssets.Count;
         _skeletalAssets[meshExport.InstancedFullPath] = name;
 
-        var mesh = ObjectBinary.From<SkeletalMesh>(meshExport);
-        var skeleton = new MergedSkeleton();
+        SkeletalMesh mesh = ObjectBinary.From<SkeletalMesh>(meshExport);
+        MergedSkeleton skeleton = new MergedSkeleton();
         skeleton.Add(mesh.RefSkeleton);
         NodeBuilder[] joints = skeleton.BuildNodes(out NodeBuilder armature);
         // Filled in below; the extras are read when the scene is written.
-        var sounds = new JsonObject();
-        var assetExtras = new JsonObject { ["placeable_asset"] = name };
-        var assetNode = new NodeBuilder($"PlaceableAsset_{name}", assetExtras);
+        JsonObject sounds = new JsonObject();
+        JsonObject assetExtras = new JsonObject { ["placeable_asset"] = name };
+        NodeBuilder assetNode = new NodeBuilder($"PlaceableAsset_{name}", assetExtras);
         assetNode.AddNode(armature);
         _scene.AddNode(assetNode);
 
-        var clips = new List<string>();
+        List<string> clips = new List<string>();
         foreach (ObjectProperty setRef in componentProps.GetProp<ArrayProperty<ObjectProperty>>("AnimSets") ?? Enumerable.Empty<ObjectProperty>())
         {
             if (!pcc.TryGetUExport(setRef.Value, out ExportEntry animSet))
@@ -826,7 +828,7 @@ public partial class LevelBuilder
         if (collision.Count > 0)
             assetExtras["placeable_collision"] = collision;
 
-        var textures = new TextureCache(pcc, new List<string>())
+        TextureCache textures = new TextureCache(pcc, new List<string>())
         {
             BakeShaders = true,
             MaxTextureSize = _maxTexture,
@@ -845,7 +847,7 @@ public partial class LevelBuilder
     // the game can attach it to the bone and have it follow the clips (a door's sliding panels).
     private static JsonArray PhysicsBodies(IMEPackage pcc, PropertyCollection componentProps, MergedSkeleton skeleton, out string log)
     {
-        var bodies = new JsonArray();
+        JsonArray bodies = new JsonArray();
         if (componentProps.GetProp<ObjectProperty>("PhysicsAsset") is not ObjectProperty assetRef
             || !pcc.TryGetUExport(assetRef.Value, out ExportEntry physicsAsset))
         {
@@ -868,10 +870,10 @@ public partial class LevelBuilder
             }
             if (bodyProps.GetProp<StructProperty>("AggGeom") is not StructProperty agg)
                 continue;
-            var hulls = new JsonArray();
+            JsonArray hulls = new JsonArray();
             foreach (Vector3[] hull in ReadAggGeom(agg))
             {
-                var points = new JsonArray();
+                JsonArray points = new JsonArray();
                 foreach (Vector3 point in hull)
                 {
                     Vector3 p = UnrealSpace.Position(point);
@@ -909,7 +911,7 @@ public partial class LevelBuilder
         PropertyCollection Props(ObjectProperty reference) =>
             reference != null && pcc.TryGetUExport(reference.Value, out ExportEntry e) ? e.GetProperties() : null;
 
-        var placeable = new JsonObject { ["class"] = actor.ClassName };
+        JsonObject placeable = new JsonObject { ["class"] = actor.ClassName };
         PropertyCollection behavior = Props(props.GetProp<ObjectProperty>("m_oBehavior"));
         PropertyCollection type = pcc.TryGetUExport(props.GetProp<ObjectProperty>("m_oBehavior")?.Value ?? 0, out ExportEntry behaviorExport)
             ? Props(InheritedProp<ObjectProperty>(behaviorExport, "m_oActorType")) : null;
@@ -925,14 +927,14 @@ public partial class LevelBuilder
         placeable["locked"] = state0 != null && state0 == state1;
 
         PropertyCollection fsm = Props(Props(props.GetProp<ObjectProperty>("FSM"))?.GetProp<ObjectProperty>("FSMData"));
-        var states = new JsonObject();
+        JsonObject states = new JsonObject();
         foreach (ObjectProperty stateRef in fsm?.GetProp<ArrayProperty<ObjectProperty>>("PlaceableStates") ?? Enumerable.Empty<ObjectProperty>())
         {
             PropertyCollection state = Props(stateRef);
             string stateName = NameOf(state, "StateName");
             if (stateName == null)
                 continue;
-            var transitions = new JsonObject();
+            JsonObject transitions = new JsonObject();
             foreach (ObjectProperty transitionRef in state.GetProp<ArrayProperty<ObjectProperty>>("StateTransitions") ?? Enumerable.Empty<ObjectProperty>())
             {
                 PropertyCollection transition = Props(transitionRef);
@@ -965,7 +967,7 @@ public partial class LevelBuilder
         }
         if (!_particleSystems.TryGetValue(system.InstancedFullPath, out JsonArray emitters))
         {
-            var notes = new List<string>();
+            List<string> notes = new List<string>();
             emitters = new JsonArray();
             foreach (ParticleExport.Emitter emitter in ParticleExport.Read(pcc, system, notes))
             {
@@ -985,11 +987,11 @@ public partial class LevelBuilder
         if (emitters.Count == 0)
             return;
 
-        var extras = new JsonObject
+        JsonObject extras = new JsonObject
         {
             ["me_particles"] = new JsonObject { ["system"] = system.InstancedFullPath, ["emitters"] = emitters.DeepClone() },
         };
-        var node = new NodeBuilder(actor.ObjectName.Instanced, extras);
+        NodeBuilder node = new NodeBuilder(actor.ObjectName.Instanced, extras);
         _particles.AddNode(node);
         node.LocalMatrix = UnrealTransform.ToGltf(UnrealTransform.ComponentToActor(componentProps) * actorToWorld);
         _emitters++;
@@ -1016,7 +1018,7 @@ public partial class LevelBuilder
                 _geometry[emitter.Mesh.InstancedFullPath] = geometry = ReadGeometry(owner, emitter.Mesh, textures);
             MaterialBuilder overrideMaterial = emitter.OverrideMaterial && emitter.Material != null
                 ? textures.MaterialFor(emitter.Material, emitter.Material.ObjectName.Instanced) : null;
-            var materials = geometry.Lod.Elements
+            MaterialBuilder[] materials = geometry.Lod.Elements
                 .Select(e => overrideMaterial ?? (owner == pcc
                     ? textures.MaterialFor(e.Material, $"{geometry.Name}_mat{e.MaterialIndex}")
                     : textures.MaterialFor(TextureCache.Resolve(owner, e.Material), $"{geometry.Name}_mat{e.MaterialIndex}")))
@@ -1027,8 +1029,8 @@ public partial class LevelBuilder
         {
             if (emitter.Material == null)
                 return null;
-            var quad = new MeshBuilder<VertexPositionNormalTangent, VertexTexture2, VertexEmpty>("ParticleQuad");
-            var primitive = quad.UsePrimitive(textures.MaterialFor(emitter.Material, emitter.Material.ObjectName.Instanced));
+            MeshBuilder<VertexPositionNormalTangent, VertexTexture2, VertexEmpty> quad = new MeshBuilder<VertexPositionNormalTangent, VertexTexture2, VertexEmpty>("ParticleQuad");
+            PrimitiveBuilder<MaterialBuilder, VertexPositionNormalTangent, VertexTexture2, VertexEmpty> primitive = quad.UsePrimitive(textures.MaterialFor(emitter.Material, emitter.Material.ObjectName.Instanced));
             VERTEX Corner(float x, float y) => new(
                 new VertexPositionNormalTangent(new Vector3(x, y, 0f), Vector3.UnitZ, new Vector4(1f, 0f, 0f, 1f)),
                 new VertexTexture2(new Vector2(x + 0.5f, 0.5f - y), new Vector2(x + 0.5f, 0.5f - y)));
@@ -1037,7 +1039,7 @@ public partial class LevelBuilder
         }
         if (render == null)
             return null;
-        var node = new NodeBuilder($"Asset_{_particleAssetKeys.Count}", new JsonObject { ["particle_asset"] = key });
+        NodeBuilder node = new NodeBuilder($"Asset_{_particleAssetKeys.Count}", new JsonObject { ["particle_asset"] = key });
         _particleAssets.AddNode(node);
         _scene.AddRigidMesh(render, node);
         _particleAssetKeys.Add(key);
@@ -1056,7 +1058,7 @@ public partial class LevelBuilder
             _geometry[meshExport.InstancedFullPath] = geometry = ReadGeometry(pcc, meshExport, textures);
         // A borrow's clip keeps only the part of the mesh near where it's seen (the Tower's
         // elevator shaft, 620 m tall, around the Presidium's stop).
-        if (_clip is var (clipMin, clipMax))
+        if (_clip is (Vector3 clipMin, Vector3 clipMax))
         {
             geometry = geometry.Clipped(world, clipMin, clipMax);
             if (!geometry.Kept.Contains(true))
@@ -1088,10 +1090,10 @@ public partial class LevelBuilder
             // Mirrored instances reverse the apparent winding, which one-sided trimesh
             // collision cares about.
             bool flip = geometry.FlipWinding ^ (world.GetDeterminant() < 0);
-            var transformed = geometry.Positions.Select(p => new COLLISION_VERTEX(UnrealSpace.Position(Vector3.Transform(p, world)))).ToArray();
-            foreach (var (a, b, c) in geometry.CollisionTriangles)
+            COLLISION_VERTEX[] transformed = geometry.Positions.Select(p => new COLLISION_VERTEX(UnrealSpace.Position(Vector3.Transform(p, world)))).ToArray();
+            foreach ((int a, int b, int c) in geometry.CollisionTriangles)
             {
-                if (CollisionBounds is var (areaMin, areaMax) && !TriangleTouchesBox(
+                if (CollisionBounds is (Vector3 areaMin, Vector3 areaMax) && !TriangleTouchesBox(
                     transformed[a].Geometry.Position, transformed[b].Geometry.Position, transformed[c].Geometry.Position, areaMin, areaMax))
                 {
                     _droppedTriangles++;
@@ -1133,12 +1135,12 @@ public partial class LevelBuilder
         string name = nodeName ?? actor.ObjectName.Instanced;
 
         LightMap lightMap = ReadLightMap(component);
-        var lighting = new JsonObject { ["type"] = "none" };
+        JsonObject lighting = new JsonObject { ["type"] = "none" };
         IMeshBuilder<MaterialBuilder> render;
         // The sections drawn on the instance's own node (the rest are merged).
         MaterialBuilder[] own = materials;
         bool merged = false;
-        var vertexMap = lightMap as LightMap_1D;
+        LightMap_1D vertexMap = lightMap as LightMap_1D;
         byte[] vertexSamples = vertexMap != null ? ReadVertexSamples(component, geometry.GltfPositions.Length) : null;
         if (vertexSamples != null)
         {
@@ -1155,7 +1157,7 @@ public partial class LevelBuilder
         }
         else
         {
-            var textureMap = lightMap as LightMap_2D;
+            LightMap_2D textureMap = lightMap as LightMap_2D;
             int page = textureMap != null && geometry.LightmapChannel > 0 ? LightmapPage(pcc, textureMap) : -1;
             // The second UV set is the mesh's lightmap layout when it has a usable one. A texture
             // lightmap needs that layout even when it strays outside 0-1, which the game allows
@@ -1163,7 +1165,7 @@ public partial class LevelBuilder
             int uv2 = page >= 0 || geometry.LightmapInRange ? geometry.LightmapChannel : 0;
             if (mergeable && page >= 0)
             {
-                var scaleBias = new Vector4(textureMap.CoordinateScale.X, textureMap.CoordinateScale.Y,
+                Vector4 scaleBias = new Vector4(textureMap.CoordinateScale.X, textureMap.CoordinateScale.Y,
                     textureMap.CoordinateBias.X, textureMap.CoordinateBias.Y);
                 own = AddMergePiece(name, geometry, materials, world, uv2, page, scaleBias, textureMap.ScaleVector1, textureMap.ScaleVector2, null, out merged);
             }
@@ -1195,7 +1197,7 @@ public partial class LevelBuilder
         {
             // Meshes without their own 0-1 lightmap UVs carry other UVs (often their tiling shading
             // UVs) in the second set; the loader keeps those out of Godot lightmap bakes.
-            var extras = new JsonObject { ["me_lightmap"] = lighting };
+            JsonObject extras = new JsonObject { ["me_lightmap"] = lighting };
             if (!geometry.LightmapInRange)
                 extras["lightmap_uv"] = false;
             if (mover != null)
@@ -1209,7 +1211,7 @@ public partial class LevelBuilder
                 BoxSphereBounds bounds = geometry.Bounds.TransformBy(world);
                 extras["me_bounds"] = new JsonArray(bounds.Origin.X, bounds.Origin.Y, bounds.Origin.Z, bounds.SphereRadius + 1f);
             }
-            var node = new NodeBuilder(name, extras);
+            NodeBuilder node = new NodeBuilder(name, extras);
             packageNode.AddNode(node);
             node.LocalMatrix = UnrealTransform.ToGltf(world);
             _scene.AddRigidMesh(render, node);
@@ -1227,7 +1229,7 @@ public partial class LevelBuilder
     {
         try
         {
-            var binary = ObjectBinary.From<StaticMeshComponent>(component);
+            StaticMeshComponent binary = ObjectBinary.From<StaticMeshComponent>(component);
             return binary.LODData.Length > 0 ? binary.LODData[0].LightMap : null;
         }
         catch (Exception)
@@ -1306,7 +1308,7 @@ public partial class LevelBuilder
         }
 
         MaterialBuilder material = textures.MaterialFor(materialRef, $"{actor.ObjectName.Instanced}_decal");
-        var decal = ObjectBinary.From<DecalComponent>(component);
+        DecalComponent decal = ObjectBinary.From<DecalComponent>(component);
         byte[] binary = component.GetBinaryData();
         int samplesFrom = 4;
         int meshes = 0;
@@ -1315,9 +1317,9 @@ public partial class LevelBuilder
         {
             int count = receiver.Vertices.Length;
             // Read in order for every vertex-lit receiver, drawn or not.
-            var vertexMap = receiver.LightMap as LightMap_1D;
+            LightMap_1D vertexMap = receiver.LightMap as LightMap_1D;
             byte[] samples = vertexMap != null ? FindVertexSamples(binary, count, ref samplesFrom) : null;
-            if (count == 0 || !_receivers.TryGetValue(receiver.PrimitiveComponent, out var on))
+            if (count == 0 || !_receivers.TryGetValue(receiver.PrimitiveComponent, out (Matrix4x4 World, JsonObject Lighting) on))
                 continue;
             JsonObject lighting;
             if (samples != null)
@@ -1330,10 +1332,10 @@ public partial class LevelBuilder
                 continue;
             }
 
-            var positions = new Vector3[count];
-            var normals = new Vector3[count];
-            var tangents = new Vector4[count];
-            var uvs = new Vector2[count];
+            Vector3[] positions = new Vector3[count];
+            Vector3[] normals = new Vector3[count];
+            Vector4[] tangents = new Vector4[count];
+            Vector2[] uvs = new Vector2[count];
             for (int v = 0; v < count; v++)
             {
                 DecalVertex vertex = receiver.Vertices[v];
@@ -1352,7 +1354,7 @@ public partial class LevelBuilder
             IMeshBuilder<MaterialBuilder> mesh;
             if (samples == null)
             {
-                var vertices = new VERTEX[count];
+                VERTEX[] vertices = new VERTEX[count];
                 for (int v = 0; v < count; v++)
                     vertices[v] = new VERTEX(new VertexPositionNormalTangent(positions[v], normals[v], tangents[v]),
                         new VertexTexture2(uvs[v], receiver.Vertices[v].LightMapCoordinate));
@@ -1360,7 +1362,7 @@ public partial class LevelBuilder
             }
             else
             {
-                var vertices = new VERTEX_LIT[count];
+                VERTEX_LIT[] vertices = new VERTEX_LIT[count];
                 for (int v = 0; v < count; v++)
                 {
                     Vector4 color = Unit(samples, v * 8);
@@ -1374,7 +1376,7 @@ public partial class LevelBuilder
                 continue;
 
             // Decals take no part in Godot lightmap bakes (lightmap_uv: false).
-            var node = new NodeBuilder(name, new JsonObject { ["me_lightmap"] = lighting, ["decal"] = true, ["lightmap_uv"] = false });
+            NodeBuilder node = new NodeBuilder(name, new JsonObject { ["me_lightmap"] = lighting, ["decal"] = true, ["lightmap_uv"] = false });
             _decalsNode.AddNode(node);
             node.LocalMatrix = UnrealTransform.ToGltf(on.World);
             _scene.AddRigidMesh(mesh, node);
@@ -1391,13 +1393,13 @@ public partial class LevelBuilder
         VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty>[] vertices, ushort[] indices, int triangles, bool flip)
         where TvM : struct, IVertexMaterial
     {
-        var mesh = new MeshBuilder<VertexPositionNormalTangent, TvM, VertexEmpty>(name);
-        var primitive = mesh.UsePrimitive(material);
+        MeshBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> mesh = new MeshBuilder<VertexPositionNormalTangent, TvM, VertexEmpty>(name);
+        PrimitiveBuilder<MaterialBuilder, VertexPositionNormalTangent, TvM, VertexEmpty> primitive = mesh.UsePrimitive(material);
         for (int t = 0; t < triangles; t++)
         {
-            var a = vertices[indices[t * 3]];
-            var b = vertices[indices[t * 3 + 1]];
-            var c = vertices[indices[t * 3 + 2]];
+            VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> a = vertices[indices[t * 3]];
+            VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> b = vertices[indices[t * 3 + 1]];
+            VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> c = vertices[indices[t * 3 + 2]];
             if (flip)
                 primitive.AddTriangle(a, c, b);
             else
@@ -1428,16 +1430,16 @@ public partial class LevelBuilder
 
     private static MeshGeometry ReadGeometry(IMEPackage pcc, ExportEntry meshExport, TextureCache textures)
     {
-        var mesh = ObjectBinary.From<StaticMesh>(meshExport);
+        StaticMesh mesh = ObjectBinary.From<StaticMesh>(meshExport);
         PropertyCollection meshProps = meshExport.GetProperties();
         StaticMeshRenderData lod = mesh.LODModels[0];
         Vector3[] positions = lod.PositionVertexBuffer.VertexData;
-        var vertexData = lod.VertexBuffer.VertexData;
+        StaticMeshVertexBuffer.StaticMeshFullVertex[] vertexData = lod.VertexBuffer.VertexData;
         ushort[] indices = lod.IndexBuffer;
 
         int uvCount = (int)lod.VertexBuffer.NumTexCoords;
         bool fullUVs = lod.VertexBuffer.bUseFullPrecisionUVs;
-        var uvs = new Vector2[uvCount][];
+        Vector2[][] uvs = new Vector2[uvCount][];
         for (int channel = 0; channel < uvCount; channel++)
         {
             uvs[channel] = new Vector2[positions.Length];
@@ -1459,9 +1461,9 @@ public partial class LevelBuilder
         bool inRange = lightmapChannel > 0
             && uvs[lightmapChannel].All(uv => uv.X >= -0.01f && uv.X <= 1.01f && uv.Y >= -0.01f && uv.Y <= 1.01f);
 
-        var gltfPositions = new Vector3[positions.Length];
-        var normals = new Vector3[positions.Length];
-        var tangents = new Vector4[positions.Length];
+        Vector3[] gltfPositions = new Vector3[positions.Length];
+        Vector3[] normals = new Vector3[positions.Length];
+        Vector4[] tangents = new Vector4[positions.Length];
         for (int v = 0; v < positions.Length; v++)
         {
             gltfPositions[v] = UnrealSpace.Position(positions[v]);
@@ -1470,7 +1472,7 @@ public partial class LevelBuilder
         }
         uint[] wideIndices = indices.Select(i => (uint)i).ToArray();
 
-        var geometry = new MeshGeometry
+        MeshGeometry geometry = new MeshGeometry
         {
             Name = meshExport.ObjectName.Instanced,
             Lod = lod,
@@ -1497,7 +1499,7 @@ public partial class LevelBuilder
         }
         else
         {
-            var tree = mesh.kDOPTreeME3UDKLE?.Triangles;
+            kDOPCollisionTriangle[] tree = mesh.kDOPTreeME3UDKLE?.Triangles;
             geometry.CollisionTriangles = tree != null
                 ? tree.Select(t => ((int)t.Vertex1, (int)t.Vertex2, (int)t.Vertex3)).ToList()
                 : Enumerable.Range(0, indices.Length / 3).Select(t => ((int)indices[t * 3], (int)indices[t * 3 + 1], (int)indices[t * 3 + 2])).ToList();
@@ -1525,7 +1527,7 @@ public partial class LevelBuilder
             Vector2[] channel3 = g.UVs[Math.Min(3, g.UVs.Length - 1)];
             if (samples == null)
             {
-                var extra = new VERTEX_LIT[count];
+                VERTEX_LIT[] extra = new VERTEX_LIT[count];
                 for (int v = 0; v < count; v++)
                 {
                     extra[v] = new VERTEX_LIT(new VertexPositionNormalTangent(g.GltfPositions[v], g.Normals[v], g.Tangents[v]),
@@ -1533,7 +1535,7 @@ public partial class LevelBuilder
                 }
                 return AddSections(new MeshBuilder<VertexPositionNormalTangent, VertexColor1Texture4, VertexEmpty>(g.Name), extra, g, materials);
             }
-            var litExtra = new VertexBuilder<VertexPositionNormalTangent, VertexMerged, VertexEmpty>[count];
+            VertexBuilder<VertexPositionNormalTangent, VertexMerged, VertexEmpty>[] litExtra = new VertexBuilder<VertexPositionNormalTangent, VertexMerged, VertexEmpty>[count];
             for (int v = 0; v < count; v++)
             {
                 Vector4 directional = Unit(samples, v * 8 + 4);
@@ -1545,13 +1547,13 @@ public partial class LevelBuilder
         }
         if (samples == null)
         {
-            var vertices = new VERTEX[count];
+            VERTEX[] vertices = new VERTEX[count];
             for (int v = 0; v < count; v++)
                 vertices[v] = new VERTEX(new VertexPositionNormalTangent(g.GltfPositions[v], g.Normals[v], g.Tangents[v]), new VertexTexture2(g.UVs[0][v], g.UVs[uv2][v]));
             return AddSections(new MeshBuilder<VertexPositionNormalTangent, VertexTexture2, VertexEmpty>(g.Name), vertices, g, materials);
         }
 
-        var lit = new VERTEX_LIT[count];
+        VERTEX_LIT[] lit = new VERTEX_LIT[count];
         for (int v = 0; v < count; v++)
         {
             Vector4 color = Unit(samples, v * 8);
@@ -1568,7 +1570,7 @@ public partial class LevelBuilder
     // the package it was read from. Null for sections that aren't drawn.
     private static MaterialBuilder[] SectionMaterials(MeshGeometry g, int[] overrides, TextureCache textures)
     {
-        var materials = new MaterialBuilder[g.Lod.Elements.Length];
+        MaterialBuilder[] materials = new MaterialBuilder[g.Lod.Elements.Length];
         for (int s = 0; s < materials.Length; s++)
         {
             StaticMeshElement element = g.Lod.Elements[s];
@@ -1630,15 +1632,15 @@ public partial class LevelBuilder
             MaterialBuilder material = materials[s];
             if (material == null)
                 continue;
-            var primitive = builder.UsePrimitive(material);
+            PrimitiveBuilder<MaterialBuilder, VertexPositionNormalTangent, TvM, VertexEmpty> primitive = builder.UsePrimitive(material);
             for (int t = 0; t < element.NumTriangles; t++)
             {
                 long i = element.FirstIndex + t * 3L;
                 if (!g.Draws(i))
                     continue;
-                var a = vertices[indices[i]];
-                var b = vertices[indices[i + 1]];
-                var c = vertices[indices[i + 2]];
+                VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> a = vertices[indices[i]];
+                VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> b = vertices[indices[i + 1]];
+                VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> c = vertices[indices[i + 2]];
                 if (g.FlipWinding)
                     primitive.AddTriangle(a, c, b);
                 else
@@ -1677,8 +1679,8 @@ public partial class LevelBuilder
             return null;
         try
         {
-            var texture = new LegendaryExplorerCore.Unreal.Classes.Texture2D(export);
-            var top = texture.Mips.First(m => m.storageType != StorageTypes.empty);
+            Texture2D texture = new LegendaryExplorerCore.Unreal.Classes.Texture2D(export);
+            Texture2DMipInfo top = texture.Mips.First(m => m.storageType != StorageTypes.empty);
             // ME1's own data and mips; encoded by us only if its format has no DDS mapping.
             MemoryImage? image = DdsTextures.Original(export, top.width);
             if (image == null && MaterialBaker.Pixels.MipBgra(export, texture, top) is byte[] bgra)
@@ -1697,13 +1699,13 @@ public partial class LevelBuilder
     private void AddLightmapTexture(int page, string map, MemoryImage image)
     {
         string name = $"Page_{page}_{map}";
-        var material = new MaterialBuilder($"LightmapPage_{page}_{map}").WithUnlitShader().WithChannelImage(KnownChannel.BaseColor, image);
-        var mesh = new MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>(name);
+        MaterialBuilder material = new MaterialBuilder($"LightmapPage_{page}_{map}").WithUnlitShader().WithChannelImage(KnownChannel.BaseColor, image);
+        MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty> mesh = new MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>(name);
         mesh.UsePrimitive(material).AddTriangle(
             new(new VertexPosition(0f, 0f, 0f), new VertexTexture1(new Vector2(0f, 0f))),
             new(new VertexPosition(0.01f, 0f, 0f), new VertexTexture1(new Vector2(1f, 0f))),
             new(new VertexPosition(0f, 0f, 0.01f), new VertexTexture1(new Vector2(0f, 1f))));
-        var node = new NodeBuilder(name, new JsonObject { ["lightmap_page"] = page, ["map"] = map });
+        NodeBuilder node = new NodeBuilder(name, new JsonObject { ["lightmap_page"] = page, ["map"] = map });
         _lightmapPagesNode.AddNode(node);
         _scene.AddRigidMesh(mesh, node);
     }
@@ -1714,18 +1716,18 @@ public partial class LevelBuilder
     {
         NodeBuilder carrier = _root.CreateNode("MaterialTextures");
         int count = 0;
-        foreach (var (key, image) in _carriedTextures.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+        foreach ((string key, MemoryImage? image) in _carriedTextures.OrderBy(kv => kv.Key, StringComparer.OrdinalIgnoreCase))
         {
             if (!image.HasValue)
                 continue;
             string name = $"Texture_{count++}";
-            var material = new MaterialBuilder(name).WithUnlitShader().WithChannelImage(KnownChannel.BaseColor, image.Value);
-            var mesh = new MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>(name);
+            MaterialBuilder material = new MaterialBuilder(name).WithUnlitShader().WithChannelImage(KnownChannel.BaseColor, image.Value);
+            MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty> mesh = new MeshBuilder<VertexPosition, VertexTexture1, VertexEmpty>(name);
             mesh.UsePrimitive(material).AddTriangle(
                 new(new VertexPosition(0f, 0f, 0f), new VertexTexture1(new Vector2(0f, 0f))),
                 new(new VertexPosition(0.01f, 0f, 0f), new VertexTexture1(new Vector2(1f, 0f))),
                 new(new VertexPosition(0f, 0f, 0.01f), new VertexTexture1(new Vector2(0f, 1f))));
-            var node = new NodeBuilder(name, new JsonObject { ["material_texture"] = key });
+            NodeBuilder node = new NodeBuilder(name, new JsonObject { ["material_texture"] = key });
             carrier.AddNode(node);
             _scene.AddRigidMesh(mesh, node);
         }
@@ -1737,7 +1739,7 @@ public partial class LevelBuilder
     // bounding boxes.
     private static List<Vector3[]> ReadBodySetup(IMEPackage pcc, PropertyCollection meshProps)
     {
-        var hulls = new List<Vector3[]>();
+        List<Vector3[]> hulls = new List<Vector3[]>();
         if (meshProps.GetProp<ObjectProperty>("BodySetup") is not ObjectProperty bodyRef
             || !pcc.TryGetUExport(bodyRef.Value, out ExportEntry body))
             return hulls;
@@ -1748,7 +1750,7 @@ public partial class LevelBuilder
 
     internal static List<Vector3[]> ReadAggGeom(StructProperty agg)
     {
-        var hulls = new List<Vector3[]>();
+        List<Vector3[]> hulls = new List<Vector3[]>();
         foreach (StructProperty convex in agg.GetProp<ArrayProperty<StructProperty>>("ConvexElems") ?? Enumerable.Empty<StructProperty>())
         {
             Vector3[] points = (convex.GetProp<ArrayProperty<StructProperty>>("VertexData") ?? Enumerable.Empty<StructProperty>())
@@ -1780,10 +1782,10 @@ public partial class LevelBuilder
 
     private static Vector3[] BoxCorners(Vector3 half, Matrix4x4 tm)
     {
-        var corners = new Vector3[8];
+        Vector3[] corners = new Vector3[8];
         for (int i = 0; i < 8; i++)
         {
-            var local = new Vector3((i & 1) != 0 ? half.X : -half.X, (i & 2) != 0 ? half.Y : -half.Y, (i & 4) != 0 ? half.Z : -half.Z);
+            Vector3 local = new Vector3((i & 1) != 0 ? half.X : -half.X, (i & 2) != 0 ? half.Y : -half.Y, (i & 4) != 0 ? half.Z : -half.Z);
             corners[i] = Vector3.Transform(local, tm);
         }
         return corners;
@@ -1808,10 +1810,10 @@ public partial class LevelBuilder
     // (Godot builds the convex shape from them), and a fan keeps every point in the mesh.
     private void AddHull(Vector3[] localPoints, Matrix4x4 world)
     {
-        var points = localPoints.Select(p => new COLLISION_VERTEX(UnrealSpace.Position(Vector3.Transform(p, world)))).ToArray();
+        COLLISION_VERTEX[] points = localPoints.Select(p => new COLLISION_VERTEX(UnrealSpace.Position(Vector3.Transform(p, world)))).ToArray();
         // Outside the playable area when its bounding box is (a slanted hull whose box touches
         // the area is kept, which only errs toward keeping collision).
-        if (CollisionBounds is var (areaMin, areaMax))
+        if (CollisionBounds is (Vector3 areaMin, Vector3 areaMax))
         {
             Vector3 min = points[0].Geometry.Position, max = min;
             foreach (COLLISION_VERTEX point in points)
@@ -1826,8 +1828,8 @@ public partial class LevelBuilder
                 return;
             }
         }
-        var hull = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Hull_{_hullCount}");
-        var primitive = hull.UsePrimitive(_collisionMaterial);
+        MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty> hull = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Hull_{_hullCount}");
+        PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> primitive = hull.UsePrimitive(_collisionMaterial);
         for (int i = 1; i + 1 < points.Length; i++)
             primitive.AddTriangle(points[0], points[i], points[i + 1]);
         _scene.AddRigidMesh(hull, _collision.CreateNode(hull.Name));
@@ -1874,7 +1876,7 @@ public partial class LevelBuilder
     {
         if (props.GetProp<BoolProperty>("bOnlyAffectSameAndSpecifiedLevels")?.Value != true)
             return null;
-        var levels = new JsonArray(Path.GetFileNameWithoutExtension(component.FileRef.FilePath));
+        JsonArray levels = new JsonArray(Path.GetFileNameWithoutExtension(component.FileRef.FilePath));
         foreach (NameProperty level in props.GetProp<ArrayProperty<NameProperty>>("OtherLevelsToAffect") ?? Enumerable.Empty<NameProperty>())
         {
             string name = level.Value.Instanced;
@@ -1902,7 +1904,7 @@ public partial class LevelBuilder
         if (component.ClassName == "SkyLightComponent")
         {
             Vector3 lower = UnrealTransform.SrgbColor(props.GetProp<StructProperty>("LowerColor"));
-            var skyExtras = new JsonObject
+            JsonObject skyExtras = new JsonObject
             {
                 ["ue_class"] = component.ClassName,
                 ["ue_brightness"] = brightness,
@@ -1958,7 +1960,7 @@ public partial class LevelBuilder
         light.Color = color;
         light.Intensity = brightness;
 
-        var extras = new JsonObject
+        JsonObject extras = new JsonObject
         {
             ["ue_class"] = component.ClassName,
             ["ue_brightness"] = brightness,
@@ -1969,7 +1971,7 @@ public partial class LevelBuilder
         };
         if (LightLevels(component, props) is JsonArray levels)
             extras["ue_levels"] = levels;
-        var node = new NodeBuilder($"{component.ClassName.Replace("Component", "")}_{_lightCount}", extras);
+        NodeBuilder node = new NodeBuilder($"{component.ClassName.Replace("Component", "")}_{_lightCount}", extras);
         _lights.AddNode(node);
 
         // Unreal lights shine along their +X axis; glTF lights along their node's -Z.
@@ -1986,7 +1988,7 @@ public partial class LevelBuilder
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         Steps?.Next("Building the level");
         AddMaterialTextures();
-        var clock = System.Diagnostics.Stopwatch.StartNew();
+        Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
         SharpGLTF.Schema2.ModelRoot model = _scene.ToGltf2(Program.GltfSettings);
         string dds = DdsTextures.Convert(model);
         double built = clock.Elapsed.TotalSeconds;
@@ -1997,7 +1999,7 @@ public partial class LevelBuilder
             + $"{_images.Count} textures, {_lightCount} lights, {_hullCount} hulls, {_trimeshTriangles} collision triangles "
             + $"(glTF built in {built:0.0} s, saved in {clock.Elapsed.TotalSeconds - built:0.0} s).");
         Console.WriteLine($"Textures: {dds}.");
-        if (CollisionBounds is var (areaMin, areaMax))
+        if (CollisionBounds is (Vector3 areaMin, Vector3 areaMax))
             Console.WriteLine($"Collision bounds {areaMin} to {areaMax}: dropped {_droppedHulls} hulls and {_droppedTriangles} collision triangles outside.");
         Console.WriteLine($"Original lighting: {_textureLit} instances from {_pageCount} lightmap pages, {_vertexLit} from vertex lightmaps, "
             + $"{_instances - _textureLit - _vertexLit} without; {_placeables} placeables.");
@@ -2060,7 +2062,7 @@ public static class UnrealTransform
     // (and cm -> m), so a world matrix W becomes P·W·P, with its translation scaled to meters.
     public static Matrix4x4 ToGltf(Matrix4x4 w)
     {
-        var p = new Matrix4x4(1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1);
+        Matrix4x4 p = new Matrix4x4(1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 1);
         Matrix4x4 g = p * w * p;
         g.M41 *= UnrealSpace.UnitsToMeters;
         g.M42 *= UnrealSpace.UnitsToMeters;
@@ -2079,7 +2081,7 @@ public static class UnrealTransform
         float sy = MathF.Sin(yaw), cy = MathF.Cos(yaw);
         float sr = MathF.Sin(roll), cr = MathF.Cos(roll);
 
-        var m = new Matrix4x4(
+        Matrix4x4 m = new Matrix4x4(
             cp * cy, cp * sy, sp, 0,
             sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, -sr * cp, 0,
             -(cr * sp * cy + sr * sy), cy * sr - cr * sp * sy, cr * cp, 0,

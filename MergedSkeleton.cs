@@ -53,7 +53,7 @@ public class MergedSkeleton
     public NodeBuilder[] BuildNodes(out NodeBuilder armature)
     {
         armature = new NodeBuilder("Armature");
-        var nodes = new NodeBuilder[_bones.Count];
+        NodeBuilder[] nodes = new NodeBuilder[_bones.Count];
         for (int i = 0; i < _bones.Count; i++)
         {
             Bone b = _bones[i];

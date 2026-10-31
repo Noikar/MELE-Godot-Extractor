@@ -50,7 +50,7 @@ public static class MorphFace
         // Offsets only translate, so each bone's change from bind to final is a translation
         // too; the normals and tangents keep their directions.
         Matrix4x4[] after = WorldPose(bones);
-        var shift = new Vector3[bones.Length];
+        Vector3[] shift = new Vector3[bones.Length];
         for (int i = 0; i < bones.Length; i++)
             shift[i] = after[i].Translation - before[i].Translation;
 
@@ -75,7 +75,7 @@ public static class MorphFace
     // Each bone's transform in mesh space (row vectors: a child's local, then its parent's).
     private static Matrix4x4[] WorldPose(MeshBone[] bones)
     {
-        var world = new Matrix4x4[bones.Length];
+        Matrix4x4[] world = new Matrix4x4[bones.Length];
         for (int i = 0; i < bones.Length; i++)
         {
             Matrix4x4 local = Matrix4x4.CreateFromQuaternion(bones[i].Orientation) * Matrix4x4.CreateTranslation(bones[i].Position);

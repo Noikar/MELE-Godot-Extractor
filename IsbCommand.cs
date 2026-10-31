@@ -11,7 +11,7 @@ public static class IsbCommand
     public static int Run(string path, string outDir, string filter)
     {
         using FileStream stream = File.OpenRead(path);
-        var bank = new ISACTBank(stream);
+        ISACTBank bank = new ISACTBank(stream);
         foreach (BankChunk chunk in bank.GetAllBankChunks())
         {
             BankChunk data = chunk.SubChunks?.FirstOrDefault(c => c is DataBankChunk);
@@ -22,8 +22,8 @@ public static class IsbCommand
                 continue;
 
             string indx = chunk.SubChunks.OfType<IntBankChunk>().FirstOrDefault(i => i.ChunkName == "indx")?.Value.ToString() ?? "?";
-            var compression = chunk.SubChunks.OfType<CompressionInfoBankChunk>().FirstOrDefault();
-            var info = chunk.SubChunks.OfType<SampleInfoBankChunk>().FirstOrDefault();
+            CompressionInfoBankChunk compression = chunk.SubChunks.OfType<CompressionInfoBankChunk>().FirstOrDefault();
+            SampleInfoBankChunk info = chunk.SubChunks.OfType<SampleInfoBankChunk>().FirstOrDefault();
             byte[] raw = data.RawData ?? [];
             string head = Encoding.ASCII.GetString(raw.Take(4).Select(b => b >= 32 && b < 127 ? b : (byte)'.').ToArray());
             Console.WriteLine($"{indx,5} {title} | {compression?.CurrentFormat} | {info?.SamplesPerSecond} Hz {info?.BitsPerSample} bit "

@@ -53,10 +53,10 @@ public static class ShaderAnalysis
         staticNote = null;
         for (ExportEntry current = material; current != null && current.ClassName.StartsWith("MaterialInstance");)
         {
-            var props = current.GetProperties();
+            PropertyCollection props = current.GetProperties();
             if (props.GetProp<BoolProperty>("bHasStaticPermutationResource")?.Value == true)
             {
-                var instance = ObjectBinary.From<MaterialInstance>(current);
+                MaterialInstance instance = ObjectBinary.From<MaterialInstance>(current);
                 StaticParameterSet set = instance.SM3StaticParameterSet;
                 MaterialShaderMap own = cache.MaterialShaderMaps.Values.FirstOrDefault(m => m.StaticParameters == set);
                 if (own != null)
@@ -107,13 +107,13 @@ public static class ShaderAnalysis
         // Static meshes use the local vertex factory. Unlit materials have one base pass
         // shader; lit ones have one per light-map policy, and any of them carries the same
         // material expressions.
-        var shaders = map.MeshShaderMaps
+        List<KeyValuePair<NameReference, ShaderReference>> shaders = map.MeshShaderMaps
             .Where(m => m.VertexFactoryType.Instanced == "FLocalVertexFactory")
             .SelectMany(m => m.Shaders)
             .Where(s => s.Key.Instanced.StartsWith("TBasePassPixelShader"))
             .OrderBy(s => s.Key.Instanced.Contains("NoLightMapPolicy") ? 0 : 1)
             .ToList();
-        foreach (var (_, reference) in shaders)
+        foreach ((NameReference _, ShaderReference reference) in shaders)
         {
             if (!cache.Shaders.TryGetValue(reference.Id, out Shader shader))
                 continue;
@@ -159,10 +159,10 @@ public static class ShaderAnalysis
             ShaderCache full = ParseFile(path);
             if (full == null)
                 return null;
-            var maps = new UMultiMap<StaticParameterSet, MaterialShaderMap>();
-            var shaders = new UMultiMap<Guid, Shader>();
+            UMultiMap<StaticParameterSet, MaterialShaderMap> maps = new UMultiMap<StaticParameterSet, MaterialShaderMap>();
+            UMultiMap<Guid, Shader> shaders = new UMultiMap<Guid, Shader>();
             // Through Select: LEX's UMap.CopyTo is broken.
-            foreach (var (key, map) in full.MaterialShaderMaps.Select(kv => (kv.Key, kv.Value)))
+            foreach ((StaticParameterSet key, MaterialShaderMap map) in full.MaterialShaderMaps.Select(kv => (kv.Key, kv.Value)))
             {
                 MeshShaderMap[] meshMaps = map.MeshShaderMaps.Where(m => m.VertexFactoryType.Instanced == vertexFactory).ToArray();
                 if (meshMaps.Length == 0)
@@ -400,18 +400,18 @@ public static class ShaderAnalysis
 
         public Linear Plus(Linear other)
         {
-            var sum = new Linear { Constant = Constant + other.Constant, Terms = new(Terms), Varies = Varies || other.Varies };
-            foreach (var (name, k) in other.Terms)
+            Linear sum = new Linear { Constant = Constant + other.Constant, Terms = new(Terms), Varies = Varies || other.Varies };
+            foreach ((string name, double k) in other.Terms)
                 sum.Terms[name] = sum.Terms.GetValueOrDefault(name) + k;
             return sum;
         }
 
         public Linear Times(double k)
         {
-            var scaled = new Linear { Constant = Constant * k, Varies = Varies };
+            Linear scaled = new Linear { Constant = Constant * k, Varies = Varies };
             if (k != 0.0)
             {
-                foreach (var (name, c) in Terms)
+                foreach ((string name, double c) in Terms)
                     scaled.Terms[name] = c * k;
             }
             return scaled;
@@ -520,7 +520,7 @@ public static class ShaderAnalysis
                 _registers[register] = values = new Linear[4];
 
             // Sources are read before any component is written (dest may also be a source).
-            var results = new List<(int Component, Linear Value)>();
+            List<(int Component, Linear Value)> results = new List<(int Component, Linear Value)>();
             string opaque = null;
             foreach (char c in mask)
             {
@@ -576,7 +576,7 @@ public static class ShaderAnalysis
                     value = Linear.Of(Math.Clamp(value.Constant, 0.0, 1.0), value.Varies);
                 results.Add((i, value));
             }
-            foreach (var (i, value) in results)
+            foreach ((int i, Linear value) in results)
                 values[i] = value;
         }
 
@@ -600,7 +600,7 @@ public static class ShaderAnalysis
         private double? Mean(Linear value)
         {
             double sum = value.Constant;
-            foreach (var (name, k) in value.Terms)
+            foreach ((string name, double k) in value.Terms)
             {
                 if (!_samples.TryGetValue(name, out Sample sample) || sample.Slot >= (_map.Uniform2DTextureExpressions?.Length ?? 0))
                     return null;
@@ -632,7 +632,7 @@ public static class ShaderAnalysis
 
             Linear u = Read(operands[1], 0), v = Read(operands[1], 1);
             bool uv0 = u.Terms.Count == 1 && u.Terms.ContainsKey("uv.x") && v.Terms.Count == 1 && v.Terms.ContainsKey("uv.y");
-            var sample = new Sample(slot, channel, uv0,
+            Sample sample = new Sample(slot, channel, uv0,
                 uv0 ? (float)u.Terms["uv.x"] : 0f, uv0 ? (float)v.Terms["uv.y"] : 0f, uv0 && (u.Varies || v.Varies));
             string name = $"tex{slot}.{"rgba"[channel]}@" + (uv0 ? $"uv*{sample.ScaleU:0.###},{sample.ScaleV:0.###}" + (sample.Panning ? "+pan" : "") : "other");
             _samples[name] = sample;
@@ -676,7 +676,7 @@ public static class ShaderAnalysis
         // depth parameters) and expressions that can't be evaluated.
         private Linear Uniform(int register, int component)
         {
-            if (!_uniforms.TryGetValue((register, component), out var uniform))
+            if (!_uniforms.TryGetValue((register, component), out (bool Vector, int Index, int Component) uniform))
                 return null;
             MaterialUniformExpression[] expressions = uniform.Vector ? _map.UniformPixelVectorExpressions : _map.UniformPixelScalarExpressions;
             if (expressions == null || uniform.Index >= expressions.Length)
@@ -689,7 +689,7 @@ public static class ShaderAnalysis
         // Splits "r0.xyz, l(1, 2, 3, 4), t0.xyzw" at top-level commas.
         private static List<string> SplitOperands(string text)
         {
-            var operands = new List<string>();
+            List<string> operands = new List<string>();
             int depth = 0, start = 0;
             for (int i = 0; i < text.Length; i++)
             {

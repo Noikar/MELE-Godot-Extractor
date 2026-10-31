@@ -1,3 +1,5 @@
+using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 
@@ -54,14 +56,14 @@ public static class ManifestCommand
             .Where(e => only == null || only.Contains(e.GetProperty("id").GetString()))
             .ToArray();
 
-        var log = new EntryLog(Console.Out);
+        EntryLog log = new EntryLog(Console.Out);
         Console.SetOut(log);
         Console.SetError(log);
         if (lanes <= 0)
             lanes = Lanes(levels, looks);
         Console.WriteLine($"{entries.Length} entries, {lanes} at a time on {ParallelLimits.Cores} cores.");
 
-        var failed = new System.Collections.Concurrent.ConcurrentBag<string>();
+        ConcurrentBag<string> failed = new System.Collections.Concurrent.ConcurrentBag<string>();
         int started = 0;
         Parallel.ForEach(entries, new ParallelOptions { MaxDegreeOfParallelism = lanes }, entry =>
         {
@@ -74,7 +76,7 @@ public static class ManifestCommand
             string result;
             using (EntryScope scope = EntryScope.Begin())
             {
-                var clock = System.Diagnostics.Stopwatch.StartNew();
+                Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
                 try
                 {
                     if (levels)
@@ -150,7 +152,7 @@ public static class ManifestCommand
     {
         string package = Program.ResolvePackage(entry.GetProperty("package").GetString());
         string folder = Path.Combine(outDir, id);
-        var sounds = new JsonObject();
+        JsonObject sounds = new JsonObject();
         foreach (JsonProperty sound in entry.GetProperty("sounds").EnumerateObject())
         {
             string[] parts = sound.Value.GetString().Split('@', 2);
@@ -178,7 +180,7 @@ public static class ManifestCommand
 
     private static void ExportLevel(JsonElement entry, string id, string outDir)
     {
-        var args = entry.GetProperty("packages").EnumerateArray().Select(p => p.GetString()).ToList();
+        List<string> args = entry.GetProperty("packages").EnumerateArray().Select(p => p.GetString()).ToList();
         // Start markers from another package (the location's persistent level), by tag.
         if (entry.TryGetProperty("markers", out JsonElement markers))
             args.AddRange(["--markers", markers.GetProperty("package").GetString(), markers.GetProperty("tags").GetString()]);
@@ -220,7 +222,7 @@ public static class ManifestCommand
                     args.AddRange(["--borrow-clip", Corner(clip, "min"), Corner(clip, "max")]);
             }
         }
-        var steps = new EntrySteps();
+        EntrySteps steps = new EntrySteps();
         if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray(), steps, laterSteps: musicIds.Length > 0 ? 1 : 0) != 0)
             throw new InvalidOperationException("level export returned an error");
 

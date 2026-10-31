@@ -47,7 +47,7 @@ public static class ParallelLimits
     // EcoQoS on, off opts out of it. Windows 10 before 1709 doesn't know it; nothing changes there.
     private static void SetPowerThrottling(Process process, bool throttled)
     {
-        var state = new PowerThrottlingState
+        PowerThrottlingState state = new PowerThrottlingState
         {
             Version = 1,
             ControlMask = ExecutionSpeed,

@@ -52,8 +52,8 @@ public static class ParticleExport
     public static List<Emitter> Read(IMEPackage pcc, ExportEntry system, List<string> notes, bool shared = false,
         IReadOnlyDictionary<string, float> parameters = null)
     {
-        var result = new List<Emitter>();
-        var reader = new Reader(pcc, shared, parameters ?? new Dictionary<string, float>());
+        List<Emitter> result = new List<Emitter>();
+        Reader reader = new Reader(pcc, shared, parameters ?? new Dictionary<string, float>());
         foreach (ObjectProperty emitterRef in system.GetProperties().GetProp<ArrayProperty<ObjectProperty>>("Emitters") ?? Enumerable.Empty<ObjectProperty>())
         {
             if (!pcc.TryGetUExport(emitterRef.Value, out ExportEntry emitter))
@@ -88,10 +88,10 @@ public static class ParticleExport
     // when it's set) at Time, as a fraction of the emitter's duration. Null when empty.
     private static JsonArray Bursts(PropertyCollection props)
     {
-        var list = props.GetProp<ArrayProperty<StructProperty>>("BurstList");
+        ArrayProperty<StructProperty> list = props.GetProp<ArrayProperty<StructProperty>>("BurstList");
         if (list == null || list.Count == 0)
             return null;
-        var bursts = new JsonArray();
+        JsonArray bursts = new JsonArray();
         foreach (StructProperty burst in list)
         {
             int count = burst.GetProp<IntProperty>("Count")?.Value ?? 0;
@@ -118,9 +118,9 @@ public static class ParticleExport
 
         public Emitter ReadEmitter(string name, PropertyCollection lodProps, List<string> notes)
         {
-            var json = new JsonObject { ["name"] = name };
-            var emitter = new Emitter { Json = json };
-            var unsupported = new List<string>();
+            JsonObject json = new JsonObject { ["name"] = name };
+            Emitter emitter = new Emitter { Json = json };
+            List<string> unsupported = new List<string>();
 
             ExportEntry Module(string property) =>
                 lodProps.GetProp<ObjectProperty>(property) is ObjectProperty o && pcc.TryGetUExport(o.Value, out ExportEntry m) ? m : null;
@@ -247,7 +247,7 @@ public static class ParticleExport
                     case "ParticleModuleLocationPrimitiveCylinder":
                     {
                         bool cylinder = module.ClassName.EndsWith("Cylinder");
-                        var shape = new JsonObject
+                        JsonObject shape = new JsonObject
                         {
                             ["type"] = cylinder ? "cylinder" : "sphere",
                             ["radius"] = Dist(p, "StartRadius", Kind.FloatCm),
@@ -354,14 +354,14 @@ public static class ParticleExport
         private JsonObject AttachedMesh(PropertyCollection p)
         {
             // The area list: tag -> its bones.
-            var areas = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, List<string>> areas = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
             bool byVertices = false;
             if (p.GetProp<ObjectProperty>("m_EmissionAreaList") is ObjectProperty listRef && Find(listRef.Value) is ExportEntry list)
             {
                 foreach (StructProperty area in list.GetProperties().GetProp<ArrayProperty<StructProperty>>("m_EmissionAreas") ?? Enumerable.Empty<StructProperty>())
                 {
                     string tag = area.GetProp<NameProperty>("AreaTag")?.Value.Instanced;
-                    var bones = (area.GetProp<ArrayProperty<StructProperty>>("Bones") ?? Enumerable.Empty<StructProperty>())
+                    List<string> bones = (area.GetProp<ArrayProperty<StructProperty>>("Bones") ?? Enumerable.Empty<StructProperty>())
                         .Select(b => b.GetProp<NameProperty>("BoneName")?.Value.Instanced)
                         .Where(b => b != null && b != "None")
                         .ToList();
@@ -372,8 +372,8 @@ public static class ParticleExport
             }
             // The module's weights name bones (EAST_WeightedDensityPerBone) or areas; without any,
             // every area's bones weigh the same.
-            var weights = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
-            var listed = p.GetProp<ArrayProperty<StructProperty>>("m_EmissionAreaWeights");
+            Dictionary<string, float> weights = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+            ArrayProperty<StructProperty> listed = p.GetProp<ArrayProperty<StructProperty>>("m_EmissionAreaWeights");
             if (listed != null && listed.Count > 0)
             {
                 foreach (StructProperty entry in listed)
@@ -416,7 +416,7 @@ public static class ParticleExport
             int lockFlags = raw.GetProp<ByteProperty>("Type")?.Value ?? 0;
             int chunk = op is 2 or 3 ? 2 : 1;
 
-            var values = new List<JsonNode>();
+            List<JsonNode> values = new List<JsonNode>();
             if (table is ArrayProperty<FloatProperty> floats)
             {
                 if (kind is not (Kind.Float or Kind.FloatCm))
@@ -442,8 +442,8 @@ public static class ParticleExport
             int entries = values.Count / chunk;
             if (entries == 0)
                 return Parameter(raw, kind);
-            var min = new JsonArray();
-            var max = new JsonArray();
+            JsonArray min = new JsonArray();
+            JsonArray max = new JsonArray();
             for (int i = 0; i < entries; i++)
             {
                 min.Add(values[i * chunk].DeepClone());
@@ -516,7 +516,7 @@ public static class ParticleExport
             string parameter = d.GetProp<NameProperty>("ParameterName")?.Value.Instanced;
             if (parameter != null && parameters.TryGetValue(parameter, out float given))
                 input = given;
-            var modes = d.GetProp<ArrayProperty<EnumProperty>>("ParamModes");
+            ArrayProperty<EnumProperty> modes = d.GetProp<ArrayProperty<EnumProperty>>("ParamModes");
             if (modes != null && index < modes.Count && modes[index].Value.Instanced == "DPM_Direct")
                 return input;
             return Map(input, Field("MinInput", 0f), Field("MaxInput", 1f), Field("MinOutput", 0f), Field("MaxOutput", 1f));

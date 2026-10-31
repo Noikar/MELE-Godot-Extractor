@@ -1,0 +1,12 @@
+root = true
+
+[*]
+charset = utf-8
+
+[*.cs]
+# Explicit types only, never `var` (IDE0008). LexExport.csproj sets EnforceCodeStyleInBuild,
+# so a `var` fails the build.
+csharp_style_var_for_built_in_types = false:error
+csharp_style_var_when_type_is_apparent = false:error
+csharp_style_var_elsewhere = false:error
+dotnet_diagnostic.IDE0008.severity = error

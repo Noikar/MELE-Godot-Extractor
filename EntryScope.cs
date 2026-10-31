@@ -39,7 +39,7 @@ public sealed class EntryScope : IDisposable
 
     public static EntryScope Begin()
     {
-        var scope = new EntryScope();
+        EntryScope scope = new EntryScope();
         CurrentScope.Value = scope;
         return scope;
     }

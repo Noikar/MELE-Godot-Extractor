@@ -82,7 +82,7 @@ public partial class LevelBuilder
         if (sound == null)
             return;
 
-        var ambient = (JsonObject)sound.DeepClone();
+        JsonObject ambient = (JsonObject)sound.DeepClone();
         float componentVolume = componentProps.GetProp<FloatProperty>("VolumeMultiplier")?.Value ?? 1f;
         ambient["volume"] = ambient["volume"]!.GetValue<float>() * componentVolume;
         // ME1 files its club music under the AMBIENCE sound group like any other ambience, so
@@ -97,7 +97,7 @@ public partial class LevelBuilder
         _ambientNode ??= _root.CreateNode("AmbientSounds");
         string packageName = Path.GetFileNameWithoutExtension(pcc.FilePath);
         ambient["chunk"] = Chunk(packageName);
-        var node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["ambient_sound"] = ambient });
+        NodeBuilder node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["ambient_sound"] = ambient });
         _ambientNode.AddNode(node);
         node.LocalMatrix = Matrix4x4.CreateTranslation(UnrealSpace.Position(actorToWorld.Translation));
         _ambientSounds++;
@@ -111,7 +111,7 @@ public partial class LevelBuilder
         if (levelExport == null)
             return;
         _musicVolumesNode ??= _root.CreateNode("MusicVolumes");
-        var found = new List<string>();
+        List<string> found = new List<string>();
         foreach (int actorIndex in ObjectBinary.From<Level>(levelExport).Actors)
         {
             if (actorIndex == 0 || !pcc.TryGetUExport(actorIndex, out ExportEntry actor) || actor.ClassName != "BioMusicVolume")
@@ -157,7 +157,7 @@ public partial class LevelBuilder
             if (state == null)
                 continue;
             string inChunk = state.Properties.GetProp<NameProperty>("InChunkName")?.Value.Instanced ?? "";
-            var visible = new JsonArray();
+            JsonArray visible = new JsonArray();
             foreach (NameProperty name in state.Properties.GetProp<ArrayProperty<NameProperty>>("VisibleChunkNames") ?? Enumerable.Empty<NameProperty>())
             {
                 if (chunks.Contains(name.Value.Instanced))
@@ -185,10 +185,10 @@ public partial class LevelBuilder
     private static JsonArray BrushHulls(PropertyCollection props, StructProperty agg)
     {
         Matrix4x4 actorToWorld = UnrealTransform.ActorToWorld(props);
-        var hulls = new JsonArray();
+        JsonArray hulls = new JsonArray();
         foreach (Vector3[] hull in ReadAggGeom(agg))
         {
-            var points = new JsonArray();
+            JsonArray points = new JsonArray();
             foreach (Vector3 p in hull)
             {
                 Vector3 world = UnrealSpace.Position(Vector3.Transform(p, actorToWorld));

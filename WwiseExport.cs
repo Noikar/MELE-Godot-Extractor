@@ -87,11 +87,11 @@ public static class WwiseExport
             throw new InvalidDataException($"{eventPath} plays nothing this exporter can read");
 
         Directory.CreateDirectory(outDir);
-        var layerJson = new JsonArray();
+        JsonArray layerJson = new JsonArray();
         int fileIndex = 0;
         foreach (Layer layer in layers)
         {
-            var files = new JsonArray();
+            JsonArray files = new JsonArray();
             foreach (uint source in layer.Sources)
             {
                 byte[] wem = WemOf(library, source, packagePath);
@@ -107,7 +107,7 @@ public static class WwiseExport
             }
             if (files.Count == 0)
                 continue;
-            var json = new JsonObject
+            JsonObject json = new JsonObject
             {
                 ["file"] = files[0].GetValue<string>(),
                 ["volume"] = MathF.Pow(10f, layer.Volume / 20f),
@@ -120,7 +120,7 @@ public static class WwiseExport
                 json["pitch_random"] = new JsonArray(Cents(layer.PitchMin), Cents(layer.PitchMax));
             if (layer.VolumeMin != 0f || layer.VolumeMax != 0f)
                 json["volume_random"] = new JsonArray(layer.VolumeMin, layer.VolumeMax);
-            if (library.Attenuations.TryGetValue(layer.Attenuation, out var radius))
+            if (library.Attenuations.TryGetValue(layer.Attenuation, out (float Min, float Max) radius))
             {
                 json["min_radius"] = radius.Min;
                 json["max_radius"] = radius.Max;
@@ -162,7 +162,7 @@ public static class WwiseExport
             foreach (Layer layer in Layers(library, id))
                 Console.WriteLine($"  layer: {layer.Sources.Count} variant(s), {layer.Volume:0.#} dB, pitch {layer.Pitch:0} cents, "
                     + $"pitch random {layer.PitchMin:0}..{layer.PitchMax:0}, volume random {layer.VolumeMin:0.#}..{layer.VolumeMax:0.#}, "
-                    + (library.Attenuations.TryGetValue(layer.Attenuation, out var r) ? $"radius {r.Min:0.#}-{r.Max:0.#} m" : "no attenuation"));
+                    + (library.Attenuations.TryGetValue(layer.Attenuation, out (float Min, float Max) r) ? $"radius {r.Min:0.#}-{r.Max:0.#} m" : "no attenuation"));
         }
         return 0;
     }
@@ -195,7 +195,7 @@ public static class WwiseExport
 
     private static List<Layer> Layers(Library library, uint eventId)
     {
-        var layers = new List<Layer>();
+        List<Layer> layers = new List<Layer>();
         if (library.Objects.GetValueOrDefault(eventId) is not WwiseBankParsed.Event wevent)
             return layers;
         foreach (uint actionId in wevent.EventActions)
@@ -207,7 +207,7 @@ public static class WwiseExport
             if (!library.Nodes.TryGetValue(action.ReferencedObjectID, out Node target))
                 continue;
             // What the target's parents add on top of everything below it.
-            var above = new Layer();
+            Layer above = new Layer();
             for (uint parent = target.Parent; library.Nodes.TryGetValue(parent, out Node p); parent = p.Parent)
                 Add(above, p);
             foreach (Layer layer in Collect(library, target, 0))
@@ -229,7 +229,7 @@ public static class WwiseExport
     // The layers a node plays, its own settings included.
     private static List<Layer> Collect(Library library, Node node, int depth)
     {
-        var result = new List<Layer>();
+        List<Layer> result = new List<Layer>();
         if (depth > 16)
             return result;
         List<Node> children = library.Children.GetValueOrDefault(node.Id, [])
@@ -239,7 +239,7 @@ public static class WwiseExport
             case HIRCType.SoundSXFSoundVoice:
                 if (node.IsCodec)
                 {
-                    var layer = new Layer();
+                    Layer layer = new Layer();
                     layer.Sources.Add(node.Source);
                     result.Add(layer);
                 }
@@ -255,7 +255,7 @@ public static class WwiseExport
             default:
                 // Random or sequence: the children are variants of one layer, with their settings
                 // averaged (the game plays one layer's variants alike).
-                var merged = new Layer();
+                Layer merged = new Layer();
                 int count = 0;
                 foreach (Node child in children)
                 {
@@ -278,7 +278,7 @@ public static class WwiseExport
         }
         foreach (Layer layer in result)
         {
-            var own = new Layer();
+            Layer own = new Layer();
             Add(own, node);
             layer.Volume += own.Volume;
             layer.Pitch += own.Pitch;
@@ -313,9 +313,9 @@ public static class WwiseExport
 
     private static Library Load(string packagePath)
     {
-        var library = new Library();
+        Library library = new Library();
         string cooked = Path.GetDirectoryName(packagePath);
-        var paths = new List<string> { packagePath };
+        List<string> paths = new List<string> { packagePath };
         paths.AddRange(SharedPackages.Select(p => Path.Combine(cooked, p)).Where(p => !p.Equals(packagePath, StringComparison.OrdinalIgnoreCase)));
         foreach (string path in paths)
         {
@@ -331,9 +331,9 @@ public static class WwiseExport
                     if (ObjectBinary.From<WwiseBank>(export).BnkFile is not { Length: > 0 })
                         continue;
                     WwiseBankParsed bank = ObjectBinary.From<WwiseBankParsed>(export);
-                    foreach (var media in bank.EmbeddedFiles)
+                    foreach (KeyValuePair<uint, byte[]> media in bank.EmbeddedFiles)
                         library.Media.TryAdd(media.Key, media.Value);
-                    foreach (var hirc in bank.HIRCObjects)
+                    foreach (KeyValuePair<uint, WwiseBankParsed.HIRCObject> hirc in bank.HIRCObjects)
                         library.Objects.TryAdd(hirc.Key, hirc.Value);
                 }
                 else if (export.ClassName == "WwiseStream")
@@ -381,7 +381,7 @@ public static class WwiseExport
             return null;
         try
         {
-            var node = new Node { Id = hirc.ID, Type = hirc.Type };
+            Node node = new Node { Id = hirc.ID, Type = hirc.Type };
             int at = 0;
             if (sound)
             {
@@ -476,7 +476,7 @@ public static class WwiseExport
     {
         if (library.Media.TryGetValue(source, out byte[] wem))
             return wem;
-        if (!library.Streams.TryGetValue(source, out var stream))
+        if (!library.Streams.TryGetValue(source, out (ExportEntry Export, WwiseStream Stream) stream))
             return null;
         if (stream.Stream.IsPCCStored)
             return stream.Stream.EmbeddedData;
@@ -515,7 +515,7 @@ public static class WwiseExport
         {
             OutputFiles.Write(wavPath, temporary =>
             {
-                var start = new ProcessStartInfo(Decoder())
+                ProcessStartInfo start = new ProcessStartInfo(Decoder())
                 {
                     UseShellExecute = false,
                     CreateNoWindow = true,

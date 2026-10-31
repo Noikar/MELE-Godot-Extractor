@@ -15,6 +15,8 @@
     <Nullable>disable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <RootNamespace>LexExport</RootNamespace>
+    <!-- Applies .editorconfig's code-style rules at build time: explicit types, never var. -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     <LexDir Condition=" '$(LexDir)' == '' ">$(USERPROFILE)\Downloads\Legendary Explorer</LexDir>
   </PropertyGroup>
 

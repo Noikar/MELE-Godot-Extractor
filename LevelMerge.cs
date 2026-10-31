@@ -109,7 +109,7 @@ public partial class LevelBuilder
             max = Vector3.Max(max, at);
         }
         Vector3 cell = (min + max) * 0.5f / MergeCell;
-        var instance = new MergeInstance
+        MergeInstance instance = new MergeInstance
         {
             Name = name,
             Geometry = geometry,
@@ -122,7 +122,7 @@ public partial class LevelBuilder
             Samples = samples,
         };
 
-        var own = (MaterialBuilder[])materials.Clone();
+        MaterialBuilder[] own = (MaterialBuilder[])materials.Clone();
         for (int s = 0; s < materials.Length; s++)
         {
             MergeKind kind = MergeKindOf(materials[s]);
@@ -135,8 +135,8 @@ public partial class LevelBuilder
             }
             // Unlit surfaces ignore the lightmap, so pieces of any lighting share their chunks.
             string lightmap = kind == MergeKind.Unlit ? "u" : page >= 0 ? $"p{page}" : "v";
-            var key = new ChunkKey(id, lightmap, (int)MathF.Floor(cell.X), (int)MathF.Floor(cell.Y), (int)MathF.Floor(cell.Z));
-            if (!_chunks.TryGetValue(key, out var pieces))
+            ChunkKey key = new ChunkKey(id, lightmap, (int)MathF.Floor(cell.X), (int)MathF.Floor(cell.Y), (int)MathF.Floor(cell.Z));
+            if (!_chunks.TryGetValue(key, out List<(MergeInstance Instance, List<int> Sections)> pieces))
             {
                 _chunks[key] = pieces = new List<(MergeInstance, List<int>)>();
                 _chunkOrder.Add(key);
@@ -189,18 +189,18 @@ public partial class LevelBuilder
         if (_chunkOrder.Count == 0)
             return;
         NodeBuilder packageNode = _mergedNode.CreateNode(packageName);
-        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (ChunkKey key in _chunkOrder)
         {
-            var pieces = _chunks[key];
+            List<(MergeInstance Instance, List<int> Sections)> pieces = _chunks[key];
             MaterialBuilder material = _materialsById[key.Material];
             string name = $"{material.Name}_{key.Lightmap}_{key.X}_{key.Y}_{key.Z}";
             for (int n = 2; !names.Add(name); n++)
                 name = $"{material.Name}_{key.Lightmap}_{key.X}_{key.Y}_{key.Z}_{n}";
 
-            var mesh = new MeshBuilder<VertexPositionNormalTangent, VertexMerged, VertexEmpty>(name);
-            var primitive = mesh.UsePrimitive(material);
-            var index = new JsonArray();
+            MeshBuilder<VertexPositionNormalTangent, VertexMerged, VertexEmpty> mesh = new MeshBuilder<VertexPositionNormalTangent, VertexMerged, VertexEmpty>(name);
+            PrimitiveBuilder<MaterialBuilder, VertexPositionNormalTangent, VertexMerged, VertexEmpty> primitive = mesh.UsePrimitive(material);
+            JsonArray index = new JsonArray();
             foreach ((MergeInstance instance, List<int> sections) in pieces)
             {
                 instance.Vertices ??= MergedVertices(instance);
@@ -218,10 +218,10 @@ public partial class LevelBuilder
                         long i = element.FirstIndex + t * 3L;
                         if (!g.Draws(i))
                             continue;
-                        var a = instance.Vertices[indices[i]];
-                        var b = instance.Vertices[indices[i + 1]];
-                        var c = instance.Vertices[indices[i + 2]];
-                        var (ia, ib, ic) = flip ? primitive.AddTriangle(a, c, b) : primitive.AddTriangle(a, b, c);
+                        MERGED_VERTEX a = instance.Vertices[indices[i]];
+                        MERGED_VERTEX b = instance.Vertices[indices[i + 1]];
+                        MERGED_VERTEX c = instance.Vertices[indices[i + 2]];
+                        (int ia, int ib, int ic) = flip ? primitive.AddTriangle(a, c, b) : primitive.AddTriangle(a, b, c);
                         // A vertex equal to an earlier piece's is shared with it, outside this range.
                         if ((ia >= 0 && ia < start) || (ib >= 0 && ib < start) || (ic >= 0 && ic < start))
                             shared = true;
@@ -249,10 +249,10 @@ public partial class LevelBuilder
 
             // Unlit chunks are "none": they keep their own (or their translated unlit) material.
             string type = key.Lightmap switch { "v" => "vertex", "u" => "none", _ => "texture" };
-            var lighting = new JsonObject { ["type"] = type, ["merged"] = true };
+            JsonObject lighting = new JsonObject { ["type"] = type, ["merged"] = true };
             if (type == "texture")
                 lighting["page"] = int.Parse(key.Lightmap[1..]);
-            var node = new NodeBuilder(name, new JsonObject
+            NodeBuilder node = new NodeBuilder(name, new JsonObject
             {
                 ["me_lightmap"] = lighting,
                 ["lightmap_uv"] = false,
@@ -276,11 +276,11 @@ public partial class LevelBuilder
         Matrix4x4.Invert(toGltf, out Matrix4x4 inverse);
         Matrix4x4 normalMatrix = Matrix4x4.Transpose(inverse);
         float handedness = toGltf.GetDeterminant() < 0 ? -1f : 1f;
-        var scales0 = new Vector2(instance.Scale0.X, instance.Scale0.Y);
-        var scales1 = new Vector2(instance.Scale0.Z, instance.Scale1.X);
-        var scales2 = new Vector2(instance.Scale1.Y, instance.Scale1.Z);
+        Vector2 scales0 = new Vector2(instance.Scale0.X, instance.Scale0.Y);
+        Vector2 scales1 = new Vector2(instance.Scale0.Z, instance.Scale1.X);
+        Vector2 scales2 = new Vector2(instance.Scale1.Y, instance.Scale1.Z);
 
-        var vertices = new MERGED_VERTEX[g.GltfPositions.Length];
+        MERGED_VERTEX[] vertices = new MERGED_VERTEX[g.GltfPositions.Length];
         for (int v = 0; v < vertices.Length; v++)
         {
             Vector3 position = Vector3.Transform(g.GltfPositions[v], toGltf);

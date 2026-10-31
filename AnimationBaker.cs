@@ -2,6 +2,7 @@ using System.Numerics;
 using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
 using LegendaryExplorerCore.Unreal.BinaryConverters;
+using SharpGLTF.Animations;
 using SharpGLTF.Scenes;
 
 namespace LexExport;
@@ -35,7 +36,7 @@ public static class AnimationBaker
         if (export.ClassName != "AnimSequence")
             throw new ArgumentException($"'{sequencePath}' is a {export.ClassName}, not an AnimSequence.");
 
-        var sequence = ObjectBinary.From<AnimSequence>(export);
+        AnimSequence sequence = ObjectBinary.From<AnimSequence>(export);
         PSA psa = PSA.CreateFrom(sequence);
         PSA.PSAAnimInfo info = psa.Infos[0];
         int boneCount = psa.Bones.Count;
@@ -65,8 +66,8 @@ public static class AnimationBaker
             bool added = !holdBind && additive != null && additive.Deltas.TryGetValue(psa.Bones[b].Name, out delta);
 
             Vector3 firstPos = FromPsa(psa.Keys[info.FirstRawFrame * boneCount + b].Position);
-            var positions = new Vector3[frames];
-            var rotations = new Quaternion[frames];
+            Vector3[] positions = new Vector3[frames];
+            Quaternion[] rotations = new Quaternion[frames];
             for (int f = 0; f < frames; f++)
             {
                 Vector3 pos = FromPsa(keys.Position(psa, info, b, f));
@@ -84,12 +85,12 @@ public static class AnimationBaker
 
             if (!compact || useTranslation)
             {
-                var translation = node.UseTranslation().UseTrackBuilder(clipName);
+                CurveBuilder<Vector3> translation = node.UseTranslation().UseTrackBuilder(clipName);
                 int count = compact && positions.All(p => Vector3.DistanceSquared(p, positions[0]) < 1e-10f) ? 1 : frames;
                 for (int f = 0; f < count; f++)
                     translation.SetPoint(f / rate, positions[f]);
             }
-            var rotation = node.UseRotation().UseTrackBuilder(clipName);
+            CurveBuilder<Quaternion> rotation = node.UseRotation().UseTrackBuilder(clipName);
             int rotationCount = compact && rotations.All(q => MathF.Abs(Quaternion.Dot(q, rotations[0])) > 0.999999f) ? 1 : frames;
             for (int f = 0; f < rotationCount; f++)
                 rotation.SetPoint(f / rate, rotations[f]);
@@ -143,8 +144,8 @@ public static class AnimationBaker
         public static TrackKeys Of(AnimSequence sequence, PSA psa, int frames)
         {
             int boneCount = psa.Bones.Count;
-            var positions = Enumerable.Repeat(frames, boneCount).ToArray();
-            var rotations = Enumerable.Repeat(frames, boneCount).ToArray();
+            int[] positions = Enumerable.Repeat(frames, boneCount).ToArray();
+            int[] rotations = Enumerable.Repeat(frames, boneCount).ToArray();
             List<AnimTrack> tracks = sequence.RawAnimationData;
             bool sameOrder = tracks != null && tracks.Count == boneCount && sequence.Bones != null
                 && sequence.Bones.Count == boneCount
@@ -203,9 +204,9 @@ public static class AnimationBaker
             Dictionary<string, (Quaternion Rotation, Vector3 Position)> pose = FirstFrame(posePcc, posePath);
             Dictionary<string, (Quaternion Rotation, Vector3 Position)> from = FirstFrame(basePcc, basePath);
             Name = $"{posePath.Split('.').Last()} - {basePath.Split('.').Last()}";
-            foreach (var (bone, key) in pose)
+            foreach ((string bone, (Quaternion Rotation, Vector3 Position) key) in pose)
             {
-                if (!from.TryGetValue(bone, out var start))
+                if (!from.TryGetValue(bone, out (Quaternion Rotation, Vector3 Position) start))
                     continue;
                 Quaternion turn = Quaternion.Normalize(key.Rotation * Quaternion.Inverse(start.Rotation));
                 Vector3 offset = key.Position - start.Position;
@@ -219,7 +220,7 @@ public static class AnimationBaker
             ExportEntry export = pcc.FindExport(sequencePath)
                 ?? throw new ArgumentException($"No export '{sequencePath}' in {Path.GetFileName(pcc.FilePath)}.");
             PSA psa = PSA.CreateFrom(ObjectBinary.From<AnimSequence>(export));
-            var frame = new Dictionary<string, (Quaternion, Vector3)>(StringComparer.OrdinalIgnoreCase);
+            Dictionary<string, (Quaternion, Vector3)> frame = new Dictionary<string, (Quaternion, Vector3)>(StringComparer.OrdinalIgnoreCase);
             for (int b = 0; b < psa.Bones.Count; b++)
             {
                 PSA.PSAAnimKeys key = psa.Keys[psa.Infos[0].FirstRawFrame * psa.Bones.Count + b];
@@ -236,7 +237,7 @@ public static class AnimationBaker
         int setData = sequence.GetProperties().GetProp<ObjectProperty>("m_pBioAnimSetData")?.Value ?? 0;
         if (!pcc.TryGetUExport(setData, out ExportEntry data))
             return null;
-        var names = data.GetProperties().GetProp<ArrayProperty<NameProperty>>("UseTranslationBoneNames");
+        ArrayProperty<NameProperty> names = data.GetProperties().GetProp<ArrayProperty<NameProperty>>("UseTranslationBoneNames");
         return names?.Count > 0
             ? names.Select(n => n.Value.Instanced).ToHashSet(StringComparer.OrdinalIgnoreCase)
             : null;
@@ -249,8 +250,8 @@ public static class AnimationBaker
     {
         ExportEntry export = pcc.FindExport(sequencePath);
         PSA psa = PSA.CreateFrom(ObjectBinary.From<AnimSequence>(export));
-        var angles = new List<double>();
-        var gaps = new List<double>();
+        List<double> angles = new List<double>();
+        List<double> gaps = new List<double>();
         for (int b = 0; b < psa.Bones.Count; b++)
         {
             string name = psa.Bones[b].Name;

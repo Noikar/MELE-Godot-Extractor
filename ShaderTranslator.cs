@@ -195,7 +195,7 @@ public static class ShaderTranslator
 
         public Translation Run(Func<int, TextureInfo> textureInfo, Func<int, TextureInfo> cubeInfo)
         {
-            var body = new StringBuilder();
+            StringBuilder body = new StringBuilder();
             bool started = false;
             foreach (string line in _lines)
             {
@@ -225,7 +225,7 @@ public static class ShaderTranslator
 
             // Registers: temps start at zero, inputs come from the Godot side, outputs are locals
             // whose color the caller reads from o0.
-            var code = new StringBuilder();
+            StringBuilder code = new StringBuilder();
             code.AppendLine("\tvec4 tmp;");
             for (int r = 0; r < _temps; r++)
                 code.AppendLine($"\tvec4 r{r} = vec4(0.0);");
@@ -235,7 +235,7 @@ public static class ShaderTranslator
                 code.AppendLine($"\tvec4 o{o} = vec4(0.0);");
             code.Append(body);
 
-            var uniforms = new StringBuilder();
+            StringBuilder uniforms = new StringBuilder();
             foreach (int t in _textures)
             {
                 TextureInfo info = textureInfo(t);
@@ -254,7 +254,7 @@ public static class ShaderTranslator
 
         private static string Hints(TextureInfo info, string filter)
         {
-            var hints = new List<string>();
+            List<string> hints = new List<string>();
             if (info.Srgb)
                 hints.Add("source_color");
             if (info.Black)
@@ -284,7 +284,7 @@ public static class ShaderTranslator
                 case "sincos":
                 {
                     string source = S(2);
-                    var statements = new List<string>();
+                    List<string> statements = new List<string>();
                     if (operands[0] != "null")
                         statements.Add(Assign(operands[0], $"sin({source})", saturate));
                     if (operands[1] != "null")
@@ -336,7 +336,7 @@ public static class ShaderTranslator
         {
             if (op is "discard_nz" or "discard_z")
             {
-                foreach (var (slot, channel) in FlowOf(operands[0], 0))
+                foreach ((int slot, char channel) in FlowOf(operands[0], 0))
                 {
                     if (channel == 'w')
                         _cutouts.Add(slot);
@@ -348,7 +348,7 @@ public static class ShaderTranslator
                 Match t = Operand.Match(operands[2]);
                 int slot = -1;
                 if (t.Success && t.Groups["reg"].Value == "t"
-                    && _resources.TryGetValue(int.Parse(t.Groups["num"].Value), out var resource)
+                    && _resources.TryGetValue(int.Parse(t.Groups["num"].Value), out (string Name, bool Cube) resource)
                     && resource.Name.StartsWith("texture_"))
                     slot = int.Parse(resource.Name["texture_".Length..]);
                 string swizzle = t.Success && t.Groups["swz"].Success ? Swizzle4(t.Groups["swz"].Value) : "xyzw";
@@ -376,7 +376,7 @@ public static class ShaderTranslator
                 return [];
             string swizzle = m.Groups["swz"].Success ? Swizzle4(m.Groups["swz"].Value) : "xyzw";
             string key = $"{m.Groups["reg"].Value}{m.Groups["num"].Value}.{swizzle[component]}";
-            return _flow.TryGetValue(key, out var flow) ? flow : [];
+            return _flow.TryGetValue(key, out HashSet<(int Slot, char Channel)> flow) ? flow : [];
         }
 
         // Sets the texture channels of each written component, by its index (0-3).
@@ -388,8 +388,8 @@ public static class ShaderTranslator
             string register = d.Groups["reg"].Value + d.Groups["num"].Value;
             string mask = d.Groups["swz"].Success ? d.Groups["swz"].Value : "xyzw";
             // Read every source before writing: a destination may also be a source.
-            var flows = mask.Select(c => (Key: $"{register}.{c}", Flow: component("xyzw".IndexOf(c)).ToHashSet())).ToList();
-            foreach (var (key, flow) in flows)
+            List<(string Key, HashSet<(int Slot, char Channel)> Flow)> flows = mask.Select(c => (Key: $"{register}.{c}", Flow: component("xyzw".IndexOf(c)).ToHashSet())).ToList();
+            foreach ((string key, HashSet<(int Slot, char Channel)> flow) in flows)
                 _flow[key] = flow;
         }
 
@@ -398,7 +398,7 @@ public static class ShaderTranslator
         private string Sample(string op, List<string> operands)
         {
             Match t = Operand.Match(operands[2]);
-            if (!t.Success || t.Groups["reg"].Value != "t" || !_resources.TryGetValue(int.Parse(t.Groups["num"].Value), out var resource))
+            if (!t.Success || t.Groups["reg"].Value != "t" || !_resources.TryGetValue(int.Parse(t.Groups["num"].Value), out (string Name, bool Cube) resource))
                 throw new NotSupportedException($"sample from {operands[2]}");
             UseResource(resource.Name);
             string coord = Source(operands[1]) + (resource.Cube ? ".xyz" : ".xy");
@@ -498,7 +498,7 @@ public static class ShaderTranslator
         private string Constant(int register, int component)
         {
             int at = register * 16 + component * 4;
-            var field = _fields.FirstOrDefault(f => at >= f.Offset && at < f.Offset + f.Size);
+            (string Name, int Offset, int Size) field = _fields.FirstOrDefault(f => at >= f.Offset && at < f.Offset + f.Size);
             if (field.Name == null)
                 throw new NotSupportedException($"constant cb0[{register}]");
             int element = (at - field.Offset) / 16;
@@ -592,7 +592,7 @@ public static class ShaderTranslator
         // Splits "r0.xyz, l(1, 2, 3, 4), t0.xyzw" at top-level commas.
         private static List<string> SplitOperands(string text)
         {
-            var operands = new List<string>();
+            List<string> operands = new List<string>();
             int depth = 0, start = 0;
             for (int i = 0; i < text.Length; i++)
             {

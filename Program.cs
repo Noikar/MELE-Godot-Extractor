@@ -225,7 +225,7 @@ public static class Program
     // Anything else is returned unchanged (a full path, or a name resolved by the caller).
     public static string ResolvePackage(string path)
     {
-        var match = Regex.Match(path, @"^(ME[123])[/\\](.+)$", RegexOptions.IgnoreCase);
+        Match match = Regex.Match(path, @"^(ME[123])[/\\](.+)$", RegexOptions.IgnoreCase);
         return match.Success
             ? Path.Combine(GameRoot, "Game", match.Groups[1].Value.ToUpperInvariant(), "BioGame", "CookedPCConsole", match.Groups[2].Value)
             : path;
@@ -235,7 +235,7 @@ public static class Program
     // "ME1/BIOA_STA60_02_DSG.pcc", so a manifest names a package on any install.
     public static string GameRelative(string path)
     {
-        var match = Regex.Match(path ?? "", @"[/\\](ME[123])[/\\]BioGame[/\\]CookedPCConsole[/\\](.+)$", RegexOptions.IgnoreCase);
+        Match match = Regex.Match(path ?? "", @"[/\\](ME[123])[/\\]BioGame[/\\]CookedPCConsole[/\\](.+)$", RegexOptions.IgnoreCase);
         return match.Success ? $"{match.Groups[1].Value.ToUpperInvariant()}/{match.Groups[2].Value}" : path;
     }
 

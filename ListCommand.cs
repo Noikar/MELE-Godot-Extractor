@@ -16,13 +16,13 @@ public static class ListCommand
         using IMEPackage pcc = MEPackageHandler.OpenMEPackage(packagePath);
         Console.WriteLine($"{Path.GetFileName(packagePath)}  ({pcc.Game}, {pcc.ExportCount} exports)");
 
-        var groups = pcc.Exports
+        IOrderedEnumerable<IGrouping<string, ExportEntry>> groups = pcc.Exports
             .Where(e => InterestingClasses.Contains(e.ClassName))
             .Where(e => filter == null || e.InstancedFullPath.Contains(filter, StringComparison.OrdinalIgnoreCase))
             .GroupBy(e => e.ClassName)
             .OrderBy(g => Array.IndexOf(InterestingClasses, g.Key));
 
-        foreach (var group in groups)
+        foreach (IGrouping<string, ExportEntry> group in groups)
         {
             Console.WriteLine($"\n[{group.Key}] ({group.Count()})");
             foreach (ExportEntry export in group.OrderBy(e => e.InstancedFullPath))

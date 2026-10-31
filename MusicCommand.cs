@@ -37,9 +37,9 @@ public static class MusicCommand
             Console.Error.WriteLine("No music table (BIOG_2DA_Music_X.Music_Music) in Engine.pcc.");
             return 1;
         }
-        var table = new Bio2DA(tableExport);
+        Bio2DA table = new Bio2DA(tableExport);
 
-        var tracks = new JsonObject();
+        JsonObject tracks = new JsonObject();
         int failures = 0;
         foreach (string id in musicIds)
         {
@@ -57,7 +57,7 @@ public static class MusicCommand
         OutputFiles.Update(Path.Combine(outDir, "music.json"), existing =>
         {
             JsonObject manifest = existing != null ? JsonNode.Parse(existing) as JsonObject ?? new JsonObject() : new JsonObject();
-            foreach (var (id, track) in tracks.ToList())
+            foreach ((string id, JsonNode track) in tracks.ToList())
             {
                 tracks.Remove(id);
                 manifest[id] = track;
@@ -124,12 +124,12 @@ public static class MusicCommand
         int sampleMs;
         using (FileStream stream = File.OpenRead(isbPath))
         {
-            var bank = new ISACTBank(stream);
+            ISACTBank bank = new ISACTBank(stream);
             BankChunk sample = bank.GetAllBankChunks().FirstOrDefault(c => c.SubChunks != null
                 && c.SubChunks.OfType<TitleBankChunk>().Any(t => t.Value.Equals(sampleTitle, StringComparison.OrdinalIgnoreCase))
                 && c.SubChunks.Any(s => s is DataBankChunk))
                 ?? throw new InvalidDataException($"no sample {sampleTitle} in {bankName}.isb");
-            var format = sample.SubChunks.OfType<CompressionInfoBankChunk>().FirstOrDefault()?.CurrentFormat;
+            CompressionInfoBankChunk.ISACTCompressionFormat? format = sample.SubChunks.OfType<CompressionInfoBankChunk>().FirstOrDefault()?.CurrentFormat;
             if (format != CompressionInfoBankChunk.ISACTCompressionFormat.OGGVORBIS)
                 throw new InvalidDataException($"sample {sampleTitle} is {format}, not Ogg Vorbis");
             data = sample.SubChunks.First(s => s is DataBankChunk).RawData;
@@ -141,7 +141,7 @@ public static class MusicCommand
         Console.WriteLine($"{id}: {cueName} -> {bankName}:{eventName} -> {sampleTitle} ({sampleMs / 1000f:0.#} s, wave says {duration:0.#} s), "
             + $"{data.Length / 1024} KB, loop {loop}, fades {Number("FadeInTime")}/{Number("FadeOutTime")} s, volume {volume}, "
             + $"silence {silenceMin:0.#}-{silenceMax:0.#} s");
-        var track = new JsonObject
+        JsonObject track = new JsonObject
         {
             ["file"] = file,
             ["loop"] = loop,
@@ -182,7 +182,7 @@ public static class MusicCommand
     // sample's resource index in the bank's own index (the ISB half of the streaming data).
     private static string SampleTitle(ISACTBankPair pair, BankChunk soundEvent, string eventName)
     {
-        var tracks = soundEvent.SubChunks.OfType<SoundEventSoundTracksFour>().First().SoundTracks;
+        List<ISACTSoundTrack> tracks = soundEvent.SubChunks.OfType<SoundEventSoundTracksFour>().First().SoundTracks;
         if (tracks.Count == 0)
             throw new InvalidDataException($"sound event {eventName} has no tracks");
         // The high half flags a streamed sample (0x1003B is sample 59).

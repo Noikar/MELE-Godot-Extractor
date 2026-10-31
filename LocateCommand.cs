@@ -22,7 +22,7 @@ public static class LocateCommand
     // Every valid install, best guess first.
     public static List<string> Installs()
     {
-        var found = new List<string>();
+        List<string> found = new List<string>();
         void Consider(string root)
         {
             if (string.IsNullOrEmpty(root) || !IsInstall(root))

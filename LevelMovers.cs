@@ -34,14 +34,14 @@ public partial class LevelBuilder
     // the move track of each group bound to an actor.
     private Dictionary<int, MoverTrack> FindMovers(IMEPackage pcc)
     {
-        var movers = new Dictionary<int, MoverTrack>();
+        Dictionary<int, MoverTrack> movers = new Dictionary<int, MoverTrack>();
         Kismet kismet = KismetOf(pcc);
         foreach (ExportEntry matinee in pcc.Exports.Where(e => e.ClassName == "SeqAct_Interp"))
         {
             PropertyCollection props = matinee.GetProperties();
             if (props.GetProp<BoolProperty>("bLooping")?.Value != true || !StartedOnLoad(pcc, matinee))
                 continue;
-            var bindings = kismet.Bindings.Where(b => b.Op == matinee).ToList();
+            List<(ExportEntry Op, string Link, HashSet<int> Objects)> bindings = kismet.Bindings.Where(b => b.Op == matinee).ToList();
             ExportEntry data = bindings.Where(b => b.Link == "Data").SelectMany(b => b.Objects)
                 .Select(i => pcc.TryGetUExport(i, out ExportEntry e) ? e : null)
                 .FirstOrDefault(e => e?.ClassName == "InterpData");
@@ -95,8 +95,8 @@ public partial class LevelBuilder
         if (actorProps == null || !_movers.TryGetValue(actor.UIndex, out MoverTrack mover))
             return null;
         PropertyCollection track = mover.Track.GetProperties();
-        var positions = Curve(track.GetProp<StructProperty>("PosTrack"));
-        var rotations = Curve(track.GetProp<StructProperty>("EulerTrack"));
+        List<CurveKey> positions = Curve(track.GetProp<StructProperty>("PosTrack"));
+        List<CurveKey> rotations = Curve(track.GetProp<StructProperty>("EulerTrack"));
         bool relative = track.GetProp<EnumProperty>("MoveFrame")?.Value.Instanced is null or "IMF_RelativeToInitial";
 
         // ActorToWorld is pre-pivot · scale · rotation · location; the matinee replaces the last two.
@@ -109,8 +109,8 @@ public partial class LevelBuilder
 
         float seconds = mover.Length / mover.PlayRate;
         int frames = Math.Max(2, (int)MathF.Ceiling(seconds * MoverFps) + 1);
-        var position = new JsonArray();
-        var rotation = new JsonArray();
+        JsonArray position = new JsonArray();
+        JsonArray rotation = new JsonArray();
         for (int i = 0; i < frames; i++)
         {
             float t = Math.Min(i / (float)MoverFps, seconds) * mover.PlayRate;
@@ -143,7 +143,7 @@ public partial class LevelBuilder
 
     private static List<CurveKey> Curve(StructProperty curve)
     {
-        var keys = new List<CurveKey>();
+        List<CurveKey> keys = new List<CurveKey>();
         foreach (StructProperty point in curve?.GetProp<ArrayProperty<StructProperty>>("Points") ?? Enumerable.Empty<StructProperty>())
         {
             keys.Add(new CurveKey(

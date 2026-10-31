@@ -16,7 +16,7 @@ public static class FindCommand
 
         // An export can be duplicated into many packages; report each path once, with the first
         // package it was found in.
-        var seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string> seen = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (string file in files)
         {
             try
@@ -36,7 +36,7 @@ public static class FindCommand
             }
         }
 
-        foreach (var (path, file) in seen.OrderBy(kv => kv.Key))
+        foreach ((string path, string file) in seen.OrderBy(kv => kv.Key))
             Console.WriteLine($"  {path}    [{file}]");
         Console.WriteLine($"{seen.Count} unique match(es).");
         return 0;

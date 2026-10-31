@@ -22,7 +22,7 @@ public static class WeaponVfx
         ExportEntry appearance = pcc.FindExport(appearancePath)
             ?? throw new ArgumentException($"No export '{appearancePath}' in {Path.GetFileName(pcc.FilePath)}.");
         PropertyCollection props = appearance.GetProperties();
-        var result = new JsonObject { ["appearance"] = appearance.InstancedFullPath };
+        JsonObject result = new JsonObject { ["appearance"] = appearance.InstancedFullPath };
 
         if (TemplateSound(pcc, Object(pcc, props, "vfxMuzzleFlash"), outDir) is JsonObject fire)
             result["fire"] = fire;

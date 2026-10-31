@@ -18,14 +18,14 @@ public static class DecalsCommand
             PropertyCollection props = e.GetProperties();
             string material = pcc.GetEntry(props.GetProp<ObjectProperty>("DecalMaterial")?.Value ?? 0)?.InstancedFullPath;
             Console.WriteLine($"== {e.UIndex} {e.InstancedFullPath}  material {material}");
-            var decal = ObjectBinary.From<DecalComponent>(e);
+            DecalComponent decal = ObjectBinary.From<DecalComponent>(e);
             foreach (StaticReceiverData r in decal.StaticReceivers)
             {
                 ExportEntry receiver = pcc.GetUExport(r.PrimitiveComponent);
                 string receiverMap = "?";
                 try
                 {
-                    var smc = ObjectBinary.From<StaticMeshComponent>(receiver);
+                    StaticMeshComponent smc = ObjectBinary.From<StaticMeshComponent>(receiver);
                     receiverMap = smc.LODData.Length > 0 ? smc.LODData[0].LightMap?.GetType().Name ?? "null" : "no LOD";
                 }
                 catch (Exception ex)

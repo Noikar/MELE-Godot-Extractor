@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
+using LegendaryExplorerCore.Unreal.BinaryConverters;
 
 namespace LexExport;
 
@@ -26,16 +27,16 @@ public static class VfxCommand
         }
         Console.WriteLine($"== {power.InstancedFullPath}");
 
-        var textures = new TextureCache(pcc, new List<string>())
+        TextureCache textures = new TextureCache(pcc, new List<string>())
         {
             GuessDiffuse = true,
             SurfaceShading = true,
             CarriedTextures = new(),
             SharedShaders = true,
         };
-        var seenMaterials = new HashSet<int>();
+        HashSet<int> seenMaterials = new HashSet<int>();
         int exported = 0, leftOut = 0;
-        var clock = Stopwatch.StartNew();
+        Stopwatch clock = Stopwatch.StartNew();
 
         foreach (ObjectProperty template in power.GetProperties().OfType<ObjectProperty>()
             .Where(p => p.Name.Instanced.StartsWith("CE_") && p.Name.Instanced.EndsWith("Template")))
@@ -56,7 +57,7 @@ public static class VfxCommand
                 if (props.GetProp<ObjectProperty>("m_pParticleSystem") is ObjectProperty systemRef
                     && pcc.TryGetUExport(systemRef.Value, out ExportEntry system))
                 {
-                    var notes = new List<string>();
+                    List<string> notes = new List<string>();
                     List<ParticleExport.Emitter> emitters = ParticleExport.Read(pcc, system, notes, shared: true);
                     exported += emitters.Count;
                     leftOut += notes.Count;
@@ -112,14 +113,14 @@ public static class VfxCommand
 
     private static IEnumerable<int> StaticMeshMaterials(ExportEntry staticMesh)
     {
-        var binary = LegendaryExplorerCore.Unreal.BinaryConverters.ObjectBinary.From<LegendaryExplorerCore.Unreal.BinaryConverters.StaticMesh>(staticMesh);
+        StaticMesh binary = LegendaryExplorerCore.Unreal.BinaryConverters.ObjectBinary.From<LegendaryExplorerCore.Unreal.BinaryConverters.StaticMesh>(staticMesh);
         return binary.LODModels.Length > 0 ? binary.LODModels[0].Elements.Select(e => e.Material) : [];
     }
 
     // A module's simple properties (names, numbers, flags, object references), one line.
     private static string Summary(IMEPackage pcc, PropertyCollection props)
     {
-        var parts = new List<string>();
+        List<string> parts = new List<string>();
         foreach (Property p in props)
         {
             string name = p.Name.Instanced;

@@ -22,7 +22,7 @@ public static class ConversationCommand
         }
 
         // The English files: "<name>.tlk" (and the male-voiced "<name>.tlk_M"), not the other languages.
-        var talkFiles = pcc.Exports
+        List<ME1TalkFile> talkFiles = pcc.Exports
             .Where(e => e.ClassName == "BioTlkFile" && (e.ObjectName.Name is "tlk" or "tlk_M"))
             .Select(e => new ME1TalkFile(pcc, e.UIndex))
             .ToList();
@@ -56,7 +56,7 @@ public static class ConversationCommand
             int transition = line.GetProp<IntProperty>("nStateTransition")?.Value ?? -1;
 
             // Entries link to replies through structs (nIndex), replies to entries through plain ints.
-            var links = new List<string>();
+            List<string> links = new List<string>();
             if (line.GetProp<ArrayProperty<StructProperty>>(linksName) is { } structLinks)
             {
                 foreach (StructProperty link in structLinks)

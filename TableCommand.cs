@@ -17,11 +17,11 @@ public static class TableCommand
             return 1;
         }
 
-        var table = new Bio2DA(export);
+        Bio2DA table = new Bio2DA(export);
         Console.WriteLine("row\t" + string.Join("\t", table.ColumnNames));
         for (int r = 0; r < table.RowCount; r++)
         {
-            var cells = Enumerable.Range(0, table.ColumnCount).Select(c => table[r, c]?.DisplayableValue ?? "");
+            IEnumerable<string> cells = Enumerable.Range(0, table.ColumnCount).Select(c => table[r, c]?.DisplayableValue ?? "");
             Console.WriteLine(table.RowNames[r] + "\t" + string.Join("\t", cells));
         }
         return 0;

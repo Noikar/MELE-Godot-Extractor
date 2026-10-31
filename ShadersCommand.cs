@@ -24,7 +24,7 @@ public static class ShadersCommand
         string vertexFactory = "FLocalVertexFactory";
         string cachePackage = null;
         string pass = "TBasePassPixelShader";
-        var patterns = new List<string>();
+        List<string> patterns = new List<string>();
         for (int i = 0; i < args.Length; i++)
         {
             if (args[i] == "--filter" && i + 1 < args.Length)
@@ -40,7 +40,7 @@ public static class ShadersCommand
         }
 
         Directory.CreateDirectory(outDir);
-        var written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> written = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string path in patterns.SelectMany(LevelCommand.ExpandPackages).Distinct(StringComparer.OrdinalIgnoreCase))
         {
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(path);
@@ -73,13 +73,13 @@ public static class ShadersCommand
     // Base material path -> the material instances whose parent chain ends there.
     private static ILookup<string, ExportEntry> InstancesByBase(IMEPackage pcc)
     {
-        var pairs = new List<(string Base, ExportEntry Instance)>();
+        List<(string Base, ExportEntry Instance)> pairs = new List<(string Base, ExportEntry Instance)>();
         foreach (ExportEntry instance in pcc.Exports.Where(e => e.ClassName == "MaterialInstanceConstant"))
         {
             IEntry current = instance;
             while (current is ExportEntry e && e.ClassName is not ("Material" or "DecalMaterial"))
             {
-                var parent = e.GetProperties().GetProp<ObjectProperty>("Parent");
+                ObjectProperty parent = e.GetProperties().GetProp<ObjectProperty>("Parent");
                 current = parent != null ? pcc.GetEntry(parent.Value) : null;
             }
             if (current is ExportEntry baseMaterial)
@@ -91,8 +91,8 @@ public static class ShadersCommand
     private static string Describe(IMEPackage pcc, ShaderCache cache, ExportEntry material, IEnumerable<ExportEntry> instances,
         string vertexFactory, string pass, out int count)
     {
-        var text = new StringBuilder();
-        var props = material.GetProperties();
+        StringBuilder text = new StringBuilder();
+        PropertyCollection props = material.GetProperties();
         string lighting = props.GetProp<EnumProperty>("LightingModel")?.Value.Instanced ?? "MLM_Phong";
         string blend = props.GetProp<EnumProperty>("BlendMode")?.Value.Instanced ?? "BLEND_Opaque";
         text.AppendLine($"// {material.InstancedFullPath} ({pcc.FileNameNoExtension}): {lighting}, {blend}"
@@ -100,13 +100,13 @@ public static class ShadersCommand
         foreach (ExportEntry instance in instances)
             text.AppendLine($"// instance {instance.InstancedFullPath}:{Parameters(pcc, instance)}");
 
-        var resource = ObjectBinary.From<Material>(material).SM3MaterialResource;
+        MaterialResource resource = ObjectBinary.From<Material>(material).SM3MaterialResource;
         int[] defaults = resource.UniformExpressionTextures;
         string Default(MaterialUniformExpressionTexture t) => t.TextureIndex < defaults.Length ? pcc.GetEntry(defaults[t.TextureIndex])?.InstancedFullPath : "?";
 
         count = 0;
         // One shader map per set of static parameters the material was cooked with.
-        var maps = cache.MaterialShaderMaps.Values.Where(m => m.StaticParameters.BaseMaterialId == resource.ID).ToList();
+        List<MaterialShaderMap> maps = cache.MaterialShaderMaps.Values.Where(m => m.StaticParameters.BaseMaterialId == resource.ID).ToList();
         for (int m = 0; m < maps.Count; m++)
         {
             MaterialShaderMap map = maps[m];
@@ -120,12 +120,12 @@ public static class ShadersCommand
             for (int i = 0; i < (map.UniformPixelScalarExpressions?.Length ?? 0); i++)
                 text.AppendLine($"// UniformPixelScalar_{i}: {Expression(map.UniformPixelScalarExpressions[i])}");
 
-            var shaders = map.MeshShaderMaps
+            IOrderedEnumerable<KeyValuePair<NameReference, ShaderReference>> shaders = map.MeshShaderMaps
                 .Where(s => s.VertexFactoryType.Instanced == vertexFactory)
                 .SelectMany(s => s.Shaders)
                 .Where(s => s.Key.Instanced.StartsWith(pass))
                 .OrderBy(s => s.Key.Instanced, StringComparer.Ordinal);
-            foreach (var (type, reference) in shaders)
+            foreach ((NameReference type, ShaderReference reference) in shaders)
             {
                 if (!cache.Shaders.TryGetValue(reference.Id, out Shader shader))
                     continue;
@@ -141,8 +141,8 @@ public static class ShadersCommand
     // An instance's own scalar, vector, and texture parameters.
     private static string Parameters(IMEPackage pcc, ExportEntry instance)
     {
-        var text = new StringBuilder();
-        var props = instance.GetProperties();
+        StringBuilder text = new StringBuilder();
+        PropertyCollection props = instance.GetProperties();
         foreach (StructProperty s in props.GetProp<ArrayProperty<StructProperty>>("ScalarParameterValues") ?? Enumerable.Empty<StructProperty>())
             text.Append($" {s.GetProp<NameProperty>("ParameterName")?.Value.Instanced}={s.GetProp<FloatProperty>("ParameterValue")?.Value}");
         foreach (StructProperty s in props.GetProp<ArrayProperty<StructProperty>>("VectorParameterValues") ?? Enumerable.Empty<StructProperty>())

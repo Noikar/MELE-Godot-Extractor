@@ -51,10 +51,10 @@ public static class SoundExport
 
         string name = cue.ObjectName.Instanced.ToLowerInvariant();
         Directory.CreateDirectory(outDir);
-        var variants = new JsonArray();
+        JsonArray variants = new JsonArray();
         for (int i = 0; i < samples.Count; i++)
         {
-            var format = samples[i].SubChunks.OfType<CompressionInfoBankChunk>().FirstOrDefault()?.CurrentFormat;
+            CompressionInfoBankChunk.ISACTCompressionFormat? format = samples[i].SubChunks.OfType<CompressionInfoBankChunk>().FirstOrDefault()?.CurrentFormat;
             if (format != CompressionInfoBankChunk.ISACTCompressionFormat.OGGVORBIS)
                 throw new InvalidDataException($"wave {node.ObjectName.Instanced} is {format}, not Ogg Vorbis");
             byte[] data = samples[i].SubChunks.First(s => s is DataBankChunk).RawData;
@@ -65,7 +65,7 @@ public static class SoundExport
             Console.WriteLine($"  sound {cue.ObjectName.Instanced} -> {node.ObjectName.Instanced} -> {title}, {data.Length / 1024} KB, "
                 + $"volume {volume}, radius {minRadius}-{maxRadius} m");
         }
-        var result = new JsonObject
+        JsonObject result = new JsonObject
         {
             ["file"] = variants[0].GetValue<string>(),
             ["volume"] = volume,
@@ -105,7 +105,7 @@ public static class SoundExport
 
         // A sound entity: parts that play at once (Flux's casino: two slot timelines and two
         // loops), or one queue of timelines (Flux's conversations), instead of one event.
-        var files = new Dictionary<int, string>();
+        Dictionary<int, string> files = new Dictionary<int, string>();
         for (int i = 0; i < samples.Count; i++)
         {
             int index = samples[i].SubChunks.OfType<IntBankChunk>().FirstOrDefault(c => c.ChunkName == "indx")?.Value ?? -1;
@@ -162,7 +162,7 @@ public static class SoundExport
             if (timeline == null)
                 return null;
             byte[] trck = Raw(timeline, "trck");
-            var lines = new JsonArray();
+            JsonArray lines = new JsonArray();
             for (int t = 0; t + 20 <= trck.Length; t += 20)
             {
                 if (Tag(trck, t) != "snde")
@@ -171,9 +171,9 @@ public static class SoundExport
                 BankChunk soundEvent = chunks.FirstOrDefault(c => Index(c) == eventIndex && c.SubChunks.Any(s => s is SoundEventSoundTracksFour));
                 if (soundEvent == null)
                     continue;
-                var lineFiles = new JsonArray();
-                var chances = new JsonArray();
-                foreach (var track in soundEvent.SubChunks.OfType<SoundEventSoundTracksFour>().First().SoundTracks)
+                JsonArray lineFiles = new JsonArray();
+                JsonArray chances = new JsonArray();
+                foreach (ISACTSoundTrack track in soundEvent.SubChunks.OfType<SoundEventSoundTracksFour>().First().SoundTracks)
                 {
                     if (files.TryGetValue((int)(track.BufferIndex & 0xFFFF), out string file))
                     {
@@ -196,7 +196,7 @@ public static class SoundExport
         JsonObject QueuePart(BankChunk queue)
         {
             byte[] qcnt = Raw(queue, "qcnt");
-            var timelines = new JsonArray();
+            JsonArray timelines = new JsonArray();
             for (int q = 0; q + 8 <= qcnt.Length; q += 8)
             {
                 if (Tag(qcnt, q) == "samp" && files.TryGetValue(BitConverter.ToUInt16(qcnt, q + 4), out string file))
@@ -207,7 +207,7 @@ public static class SoundExport
             return timelines.Count > 0 ? new JsonObject { ["gain"] = Gain(queue), ["timelines"] = timelines } : null;
         }
 
-        var parts = new JsonArray();
+        JsonArray parts = new JsonArray();
         byte[] ecac = Raw(named, "ecac");
         entity = ecac != null;
         if (ecac != null)
@@ -250,7 +250,7 @@ public static class SoundExport
     // (keyed by cue path; null for a cue that couldn't be exported).
     public static JsonArray ClipSounds(IMEPackage pcc, ExportEntry sequence, string outDir, Dictionary<string, JsonObject> cache)
     {
-        var result = new JsonArray();
+        JsonArray result = new JsonArray();
         foreach (StructProperty entry in sequence.GetProperties().GetProp<ArrayProperty<StructProperty>>("Notifies") ?? Enumerable.Empty<StructProperty>())
         {
             if (!pcc.TryGetUExport(entry.Properties.GetProp<ObjectProperty>("Notify")?.Value ?? 0, out ExportEntry notify)
@@ -271,7 +271,7 @@ public static class SoundExport
             }
             if (sound == null)
                 continue;
-            var played = (JsonObject)sound.DeepClone();
+            JsonObject played = (JsonObject)sound.DeepClone();
             played["time"] = entry.Properties.GetProp<FloatProperty>("Time")?.Value ?? 0f;
             result.Add(played);
         }
@@ -282,7 +282,7 @@ public static class SoundExport
     // ParticleExport); index 0 or 1 picks one end, which for a constant is the value.
     private static float TableValue(PropertyCollection props, string name, int index)
     {
-        var table = props.GetProp<StructProperty>(name)?.Properties.GetProp<ArrayProperty<FloatProperty>>("LookupTable");
+        ArrayProperty<FloatProperty> table = props.GetProp<StructProperty>(name)?.Properties.GetProp<ArrayProperty<FloatProperty>>("LookupTable");
         return table != null && table.Count > index ? table[index].Value : 0f;
     }
 }

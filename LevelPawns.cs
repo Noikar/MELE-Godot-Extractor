@@ -121,7 +121,7 @@ public partial class LevelBuilder
             _pawnsAtStations++;
         }
 
-        var pawn = new JsonObject
+        JsonObject pawn = new JsonObject
         {
             ["asset"] = asset.Name,
             ["tag"] = tag,
@@ -151,8 +151,8 @@ public partial class LevelBuilder
             pawn["clip"] = pose;
         else
             _pawnsUnposed++;
-        var twitches = new JsonArray();
-        foreach (var (set, anim) in plan.Twitches)
+        JsonArray twitches = new JsonArray();
+        foreach ((string set, string anim) in plan.Twitches)
         {
             if (BakeClip(asset, set, anim, species) is string twitch)
                 twitches.Add(twitch);
@@ -160,7 +160,7 @@ public partial class LevelBuilder
         if (twitches.Count > 0)
             pawn["twitches"] = twitches;
 
-        var node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["pawn"] = pawn });
+        NodeBuilder node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["pawn"] = pawn });
         _pawnsNode.AddNode(node);
         node.LocalMatrix = UnrealTransform.ToGltf(meshToWorld);
         _pawns++;
@@ -216,7 +216,7 @@ public partial class LevelBuilder
     // Null when none of its components has a mesh.
     private static Look ReadLook(IMEPackage pcc, ExportEntry actor, ExportEntry body, ExportEntry type)
     {
-        var components = new List<ExportEntry> { body };
+        List<ExportEntry> components = new List<ExportEntry> { body };
         if (pcc.TryGetUExport(InheritedProp<ObjectProperty>(actor, "m_oHeadMesh")?.Value ?? 0, out ExportEntry headComponent))
             components.Add(headComponent);
         foreach (ObjectProperty extra in InheritedProp<ArrayProperty<ObjectProperty>>(actor, "m_aoMeshes") ?? Enumerable.Empty<ObjectProperty>())
@@ -227,7 +227,7 @@ public partial class LevelBuilder
 
         // The actor type's morph face reshapes the base head the component draws, and brings
         // the hair; its material overrides (and the type's) are what tinted the pawn's instances.
-        var look = new Look();
+        Look look = new Look();
         if (type != null && pcc.TryGetUExport(type.GetProperties().GetProp<ObjectProperty>("m_oMorphFace")?.Value ?? 0, out ExportEntry morphExport))
         {
             look.MorphExport = morphExport;
@@ -238,7 +238,7 @@ public partial class LevelBuilder
         if (type != null && pcc.TryGetUExport(type.GetProperties().GetProp<ObjectProperty>("m_oMaterialOverrides")?.Value ?? 0, out ExportEntry typeOverride))
             look.TypeOverride = typeOverride;
 
-        var key = new StringBuilder($"look {LookVersion} at {PawnTextureSize}|");
+        StringBuilder key = new StringBuilder($"look {LookVersion} at {PawnTextureSize}|");
         key.Append(look.MorphExport?.InstancedFullPath ?? "-");
         foreach (ExportEntry component in components)
         {
@@ -255,7 +255,7 @@ public partial class LevelBuilder
             else
                 mesh = ObjectBinary.From<SkeletalMesh>(meshExport);
             // The component's own instances replace the mesh's materials slot by slot.
-            var overrides = InheritedProp<ArrayProperty<ObjectProperty>>(component, "Materials");
+            ArrayProperty<ObjectProperty> overrides = InheritedProp<ArrayProperty<ObjectProperty>>(component, "Materials");
             for (int s = 0; s < (overrides?.Count ?? 0) && s < mesh.Materials.Length; s++)
             {
                 if (overrides[s].Value != 0)
@@ -278,7 +278,7 @@ public partial class LevelBuilder
         // skeleton holds them whichever part comes first.
         if (look.Morph != null)
         {
-            foreach (var (_, mesh) in look.Parts)
+            foreach ((string _, SkeletalMesh mesh) in look.Parts)
                 MorphFace.ApplyBoneOffsets(mesh, look.Morph.BoneOffsets);
         }
         // The overrides tint the bake too (the face's rides on its path).
@@ -291,7 +291,7 @@ public partial class LevelBuilder
     // A BioMaterialOverride's texture and color overrides, for a look's key.
     private static string OverrideSignature(IMEPackage pcc, ExportEntry materialOverride)
     {
-        var text = new StringBuilder();
+        StringBuilder text = new StringBuilder();
         PropertyCollection props = materialOverride.GetProperties();
         foreach (string list in new[] { "m_aTextureOverrides", "m_aColorOverrides" })
         {
@@ -313,12 +313,12 @@ public partial class LevelBuilder
             return existing;
 
         string name = $"PawnAsset_{_pawnAssets.Count}";
-        var skeleton = new MergedSkeleton();
-        foreach (var (_, mesh) in look.Parts)
+        MergedSkeleton skeleton = new MergedSkeleton();
+        foreach ((string _, SkeletalMesh mesh) in look.Parts)
             skeleton.Add(mesh.RefSkeleton);
         NodeBuilder[] joints = skeleton.BuildNodes(out NodeBuilder armature);
-        var extras = new JsonObject { ["pawn_asset"] = name, ["species"] = look.Species, ["look"] = hash };
-        var assetNode = new NodeBuilder(name, extras);
+        JsonObject extras = new JsonObject { ["pawn_asset"] = name, ["species"] = look.Species, ["look"] = hash };
+        NodeBuilder assetNode = new NodeBuilder(name, extras);
         assetNode.AddNode(armature);
         _scene.AddNode(assetNode);
         _scene.AddSkinnedMesh(SkeletonPlaceholder(name), Matrix4x4.Identity, joints);
@@ -331,7 +331,7 @@ public partial class LevelBuilder
             ["actor"] = actor.InstancedFullPath,
             ["uindex"] = actor.UIndex,
         });
-        var asset = new PawnAsset { Name = name, Skeleton = skeleton, Joints = joints, Extras = extras };
+        PawnAsset asset = new PawnAsset { Name = name, Skeleton = skeleton, Joints = joints, Extras = extras };
         _pawnAssets[hash] = asset;
         Console.WriteLine($"  pawn look {name} = {hash} ({look.Describe(actor)}): {skeleton.Bones.Count} bones.");
         return asset;
@@ -342,7 +342,7 @@ public partial class LevelBuilder
     // degenerate triangles, so it can't be a point.)
     private static IMeshBuilder<MaterialBuilder> SkeletonPlaceholder(string name)
     {
-        var mesh = new MeshBuilder<VertexPosition, VertexEmpty, VertexJoints4>($"{name}_Skeleton");
+        MeshBuilder<VertexPosition, VertexEmpty, VertexJoints4> mesh = new MeshBuilder<VertexPosition, VertexEmpty, VertexJoints4>($"{name}_Skeleton");
         VertexBuilder<VertexPosition, VertexEmpty, VertexJoints4> Corner(float x, float z) =>
             new(new VertexPosition(x, 0f, z), new VertexEmpty(), new VertexJoints4((0, 1f)));
         mesh.UsePrimitive(new MaterialBuilder($"{name}_Skeleton").WithUnlitShader())
@@ -355,7 +355,7 @@ public partial class LevelBuilder
     {
         if (_looks.Count == 0)
             return;
-        var manifest = new JsonObject
+        JsonObject manifest = new JsonObject
         {
             ["version"] = LookVersion,
             ["level"] = Path.GetFileNameWithoutExtension(outPath),
@@ -382,21 +382,21 @@ public partial class LevelBuilder
             throw new InvalidDataException($"{actorPath} is look {look.Hash} now, not {id}: export the level again");
 
         const string name = "PawnAsset";
-        var skeleton = new MergedSkeleton();
-        foreach (var (_, mesh) in look.Parts)
+        MergedSkeleton skeleton = new MergedSkeleton();
+        foreach ((string _, SkeletalMesh mesh) in look.Parts)
             skeleton.Add(mesh.RefSkeleton);
         NodeBuilder[] joints = skeleton.BuildNodes(out NodeBuilder armature);
-        var assetNode = new NodeBuilder(name, new JsonObject { ["pawn_asset"] = name, ["species"] = look.Species, ["look"] = id });
+        NodeBuilder assetNode = new NodeBuilder(name, new JsonObject { ["pawn_asset"] = name, ["species"] = look.Species, ["look"] = id });
         assetNode.AddNode(armature);
-        var scene = new SceneBuilder();
+        SceneBuilder scene = new SceneBuilder();
         scene.AddNode(assetNode);
 
-        var textures = new TextureCache(pcc, []) { BakeShaders = true, ResolveImports = true, MaxTextureSize = PawnTextureSize };
+        TextureCache textures = new TextureCache(pcc, []) { BakeShaders = true, ResolveImports = true, MaxTextureSize = PawnTextureSize };
         if (look.FaceOverride != null)
             textures.AddOverrides(look.FaceOverride);
         if (look.TypeOverride != null)
             textures.AddOverrides(look.TypeOverride, keepSkinTone: true);
-        foreach (var (partName, mesh) in look.Parts)
+        foreach ((string partName, SkeletalMesh mesh) in look.Parts)
             scene.AddSkinnedMesh(MeshCommand.BuildMesh($"{name}_{partName}", mesh, skeleton, textures), Matrix4x4.Identity, joints);
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
@@ -414,7 +414,7 @@ public partial class LevelBuilder
         IEntry entry = material != 0 ? pcc.GetEntry(material) : null;
         if (entry is not ExportEntry export || export.ClassName is "Material")
             return entry?.InstancedFullPath ?? "-";
-        var text = new StringBuilder();
+        StringBuilder text = new StringBuilder();
         PropertyCollection props = export.GetProperties();
         text.Append(MaterialSignature(pcc, props.GetProp<ObjectProperty>("Parent")?.Value ?? 0));
         foreach (string list in new[] { "VectorParameterValues", "ScalarParameterValues", "TextureParameterValues" })
@@ -518,15 +518,15 @@ public partial class LevelBuilder
         foreach (ExportEntry e in pcc.Exports.Where(e => e.ClassName == "AnimSequence"))
             _levelAnimations.TryAdd(e.ObjectName.Instanced, e);
 
-        var ops = pcc.Exports.Where(e => (e.ClassName.StartsWith("Seq") || e.ClassName.StartsWith("BioSeq"))
+        List<ExportEntry> ops = pcc.Exports.Where(e => (e.ClassName.StartsWith("Seq") || e.ClassName.StartsWith("BioSeq"))
             && !e.ClassName.StartsWith("SeqVar")).ToList();
-        var named = new Dictionary<string, List<ExportEntry>>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, List<ExportEntry>> named = new Dictionary<string, List<ExportEntry>>(StringComparer.OrdinalIgnoreCase);
         foreach (ExportEntry v in pcc.Exports.Where(e => e.ClassName.StartsWith("SeqVar") && e.ClassName is not ("SeqVar_Named" or "SeqVar_ScopedNamed")))
         {
             string name = v.GetProperties().GetProp<NameProperty>("VarName")?.Value.Instanced;
             if (!string.IsNullOrEmpty(name) && name != "None")
             {
-                if (!named.TryGetValue(name, out var list))
+                if (!named.TryGetValue(name, out List<ExportEntry> list))
                     named[name] = list = new();
                 list.Add(v);
             }
@@ -534,7 +534,7 @@ public partial class LevelBuilder
 
         HashSet<int> Resolve(ExportEntry v, HashSet<int> seen)
         {
-            var result = new HashSet<int>();
+            HashSet<int> result = new HashSet<int>();
             if (!seen.Add(v.UIndex))
                 return result;
             PropertyCollection p = v.GetProperties();
@@ -551,11 +551,11 @@ public partial class LevelBuilder
                 case "SeqVar_External":
                 {
                     string label = p.GetProp<StrProperty>("VariableLabel")?.Value;
-                    var sequence = v.Parent as ExportEntry;
-                    var linker = sequence?.Parent is ExportEntry reference && reference.ClassName == "SequenceReference" ? reference : sequence;
+                    ExportEntry sequence = v.Parent as ExportEntry;
+                    ExportEntry linker = sequence?.Parent is ExportEntry reference && reference.ClassName == "SequenceReference" ? reference : sequence;
                     foreach (ExportEntry owner in new[] { linker, sequence }.Where(o => o != null).Distinct())
                     {
-                        foreach (var (link, vars) in VariableLinks(pcc, owner))
+                        foreach ((string link, List<ExportEntry> vars) in VariableLinks(pcc, owner))
                         {
                             if (string.Equals(link, label, StringComparison.OrdinalIgnoreCase))
                                 foreach (ExportEntry x in vars)
@@ -567,7 +567,7 @@ public partial class LevelBuilder
                 case "SeqVar_Named" or "SeqVar_ScopedNamed":
                 {
                     string find = p.GetProp<NameProperty>("FindVarName")?.Value.Instanced;
-                    if (find != null && named.TryGetValue(find, out var list))
+                    if (find != null && named.TryGetValue(find, out List<ExportEntry> list))
                         foreach (ExportEntry x in list)
                             result.UnionWith(Resolve(x, seen));
                     break;
@@ -581,9 +581,9 @@ public partial class LevelBuilder
 
         foreach (ExportEntry op in ops)
         {
-            foreach (var (link, vars) in VariableLinks(pcc, op))
+            foreach ((string link, List<ExportEntry> vars) in VariableLinks(pcc, op))
             {
-                var objects = new HashSet<int>();
+                HashSet<int> objects = new HashSet<int>();
                 foreach (ExportEntry v in vars)
                     objects.UnionWith(Resolve(v, new HashSet<int>()));
                 _kismet.Bindings.Add((op, link, objects));
@@ -595,7 +595,7 @@ public partial class LevelBuilder
                     int to = target.GetProp<ObjectProperty>("LinkedOp")?.Value ?? 0;
                     if (to <= 0)
                         continue;
-                    if (!_kismet.Incoming.TryGetValue(to, out var from))
+                    if (!_kismet.Incoming.TryGetValue(to, out List<(ExportEntry From, string Link)> from))
                         _kismet.Incoming[to] = from = new();
                     from.Add((op, output.GetProp<StrProperty>("LinkDesc")?.Value));
                 }
@@ -607,10 +607,10 @@ public partial class LevelBuilder
     // A sequence op's variable links: (LinkDesc, the variables linked there).
     private static List<(string Link, List<ExportEntry> Vars)> VariableLinks(IMEPackage pcc, ExportEntry op)
     {
-        var result = new List<(string, List<ExportEntry>)>();
+        List<(string, List<ExportEntry>)> result = new List<(string, List<ExportEntry>)>();
         foreach (StructProperty link in op.GetProperties().GetProp<ArrayProperty<StructProperty>>("VariableLinks") ?? Enumerable.Empty<StructProperty>())
         {
-            var vars = new List<ExportEntry>();
+            List<ExportEntry> vars = new List<ExportEntry>();
             foreach (ObjectProperty v in link.GetProp<ArrayProperty<ObjectProperty>>("LinkedVariables") ?? Enumerable.Empty<ObjectProperty>())
             {
                 if (pcc.TryGetUExport(v.Value, out ExportEntry variable))
@@ -624,27 +624,27 @@ public partial class LevelBuilder
     private PawnPlan PlanFor(IMEPackage pcc, ExportEntry actor, ExportEntry type)
     {
         Kismet kismet = KismetOf(pcc);
-        var plan = new PawnPlan();
-        var mine = kismet.Bindings.Where(b => b.Objects.Contains(actor.UIndex)).ToList();
+        PawnPlan plan = new PawnPlan();
+        List<(ExportEntry Op, string Link, HashSet<int> Objects)> mine = kismet.Bindings.Where(b => b.Objects.Contains(actor.UIndex)).ToList();
         static string Name(StructProperty s, string name) => s?.GetProp<NameProperty>(name)?.Value.Instanced is string v && v != "None" ? v : null;
 
         // Its action station: the first one that takes it (Flux's patrons have alternatives).
-        foreach (var (op, link, _) in mine.Where(b => b.Op.ClassName == "BioSeqAct_ActionStation" && b.Link == "Pawn"))
+        foreach ((ExportEntry op, string link, HashSet<int> _) in mine.Where(b => b.Op.ClassName == "BioSeqAct_ActionStation" && b.Link == "Pawn"))
         {
             StructProperty entrance = op.GetProperties().GetProp<StructProperty>("m_EntranceTransition");
             if (Name(entrance, "nmPoseSet") is not string set || Name(entrance, "nmPoseAnim") is not string anim)
                 continue;
             plan.Pose = (set, anim);
-            var station = kismet.Bindings.FirstOrDefault(b => b.Op == op && b.Link == "PathNode").Objects;
+            HashSet<int> station = kismet.Bindings.FirstOrDefault(b => b.Op == op && b.Link == "PathNode").Objects;
             if (station?.FirstOrDefault() is int index && pcc.TryGetUExport(index, out ExportEntry waypoint) && waypoint.ClassName == "BioWp_ActionStation")
                 plan.Station = waypoint;
             break;
         }
 
         // Its twitches: the gesture tracks of matinees that bind it.
-        foreach (var (op, link, _) in mine.Where(b => b.Op.ClassName == "SeqAct_Interp"))
+        foreach ((ExportEntry op, string link, HashSet<int> _) in mine.Where(b => b.Op.ClassName == "SeqAct_Interp"))
         {
-            var data = kismet.Bindings.FirstOrDefault(b => b.Op == op && b.Link == "Data").Objects ?? new HashSet<int>();
+            HashSet<int> data = kismet.Bindings.FirstOrDefault(b => b.Op == op && b.Link == "Data").Objects ?? new HashSet<int>();
             foreach (int dataIndex in data)
             {
                 if (!pcc.TryGetUExport(dataIndex, out ExportEntry interpData) || interpData.ClassName != "InterpData")
@@ -682,10 +682,10 @@ public partial class LevelBuilder
         }
 
         // Shown or hidden at load: ModifyPropertyPawn [Active] fired from a plot check's False output.
-        foreach (var (op, _, _) in mine.Where(b => b.Op.ClassName == "BioSeqAct_ModifyPropertyPawn" && b.Link == "Target"))
+        foreach ((ExportEntry op, string _, HashSet<int> _) in mine.Where(b => b.Op.ClassName == "BioSeqAct_ModifyPropertyPawn" && b.Link == "Target"))
         {
             bool fromFalse = kismet.Incoming.GetValueOrDefault(op.UIndex)?.Any(i => i.From.ClassName == "BioSeqAct_PMCheckState" && i.Link == "False") == true;
-            var active = kismet.Bindings.FirstOrDefault(b => b.Op == op && b.Link == "Active").Objects;
+            HashSet<int> active = kismet.Bindings.FirstOrDefault(b => b.Op == op && b.Link == "Active").Objects;
             if (!fromFalse || active == null || active.Count != 1 || !pcc.TryGetUExport(active.First(), out ExportEntry flag) || flag.ClassName != "SeqVar_Bool")
                 continue;
             plan.Shown = (flag.GetProperties().GetProp<IntProperty>("bValue")?.Value ?? 0) != 0;
@@ -698,7 +698,7 @@ public partial class LevelBuilder
     // human one others share).
     private (IMEPackage Package, ExportEntry Sequence) FindAnimation(string set, string anim, string species, bool sharedOnly = false)
     {
-        var names = new List<string>();
+        List<string> names = new List<string>();
         if (species == "krogan" && set.StartsWith("HMM_", StringComparison.OrdinalIgnoreCase))
             names.Add("KRO_" + set[4..] + "_" + anim);
         names.Add(set + "_" + anim);
@@ -723,7 +723,7 @@ public partial class LevelBuilder
     // (DL_LookLeft, DL_HeadRight) map no bones, so the shared package's copy is tried next.
     private string BakeClip(PawnAsset asset, string set, string anim, string species)
     {
-        var (package, sequence) = FindAnimation(set, anim, species);
+        (IMEPackage package, ExportEntry sequence) = FindAnimation(set, anim, species);
         if (sequence == null)
         {
             _missingClips.Add($"{set}/{anim}");
@@ -738,7 +738,7 @@ public partial class LevelBuilder
         int mapped = AnimationBaker.Bake(package, sequence.InstancedFullPath, clip, asset.Skeleton, asset.Joints, inPlace: true, compact: true);
         if (mapped == 0 && package != _sharedAnimations)
         {
-            var (shared, sharedSequence) = FindAnimation(set, anim, species, sharedOnly: true);
+            (IMEPackage shared, ExportEntry sharedSequence) = FindAnimation(set, anim, species, sharedOnly: true);
             if (sharedSequence != null)
                 mapped = AnimationBaker.Bake(shared, sharedSequence.InstancedFullPath, clip, asset.Skeleton, asset.Joints, inPlace: true, compact: true);
         }

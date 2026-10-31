@@ -65,10 +65,10 @@ public partial class LevelBuilder
     // ones).
     private static HashSet<string> ChannelSet(ExportEntry export, string[] classDefault)
     {
-        var chain = new List<ExportEntry>();
+        List<ExportEntry> chain = new List<ExportEntry>();
         for (ExportEntry e = export; e != null; e = e.Archetype as ExportEntry)
             chain.Add(e);
-        var set = classDefault.ToHashSet();
+        HashSet<string> set = classDefault.ToHashSet();
         for (int i = chain.Count - 1; i >= 0; i--)
         {
             if (chain[i].GetProperties().GetProp<StructProperty>("LightingChannels") is not StructProperty channels)

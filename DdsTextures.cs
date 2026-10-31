@@ -28,7 +28,7 @@ public static class DdsTextures
     // export log.
     public static string Convert(ModelRoot model)
     {
-        var normals = model.LogicalMaterials
+        HashSet<SharpGLTF.Schema2.Image> normals = model.LogicalMaterials
             .SelectMany(m => m.Channels)
             .Where(c => c.Key == "Normal" && c.Texture?.PrimaryImage != null)
             .Select(c => c.Texture.PrimaryImage)
@@ -36,9 +36,9 @@ public static class DdsTextures
 
         // Stragglers only: everything we write is already DDS. A DDS texture's fallback image
         // is SharpGLTF's own placeholder PNG, which stays.
-        var stragglers = model.LogicalTextures.Select(t => t.PrimaryImage)
+        List<SharpGLTF.Schema2.Image> stragglers = model.LogicalTextures.Select(t => t.PrimaryImage)
             .Where(i => i != null && (i.Content.IsPng || i.Content.IsJpg)).Distinct().ToList();
-        var converted = new byte[stragglers.Count][];
+        byte[][] converted = new byte[stragglers.Count][];
         Parallel.For(0, stragglers.Count, ParallelLimits.Options, i =>
             converted[i] = EncodeDds(stragglers[i].Content, normals.Contains(stragglers[i])));
         for (int i = 0; i < stragglers.Count; i++)
@@ -79,7 +79,7 @@ public static class DdsTextures
     // Baked pixels as a DDS image (see EncodeBgra).
     public static MemoryImage Encode(Rgba32[] pixels, int width, int height, bool normalMap)
     {
-        var bgra = new byte[pixels.Length * 4];
+        byte[] bgra = new byte[pixels.Length * 4];
         for (int i = 0; i < pixels.Length; i++)
         {
             Rgba32 p = pixels[i];
@@ -98,8 +98,8 @@ public static class DdsTextures
         byte[] dds = EncodeBgra(bgra, width, height, normalMap);
         if (dds != null)
             return new MemoryImage(dds);
-        using var image = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Bgra32>(bgra, width, height);
-        using var png = new MemoryStream();
+        using Image<Bgra32> image = SixLabors.ImageSharp.Image.LoadPixelData<SixLabors.ImageSharp.PixelFormats.Bgra32>(bgra, width, height);
+        using MemoryStream png = new MemoryStream();
         image.SaveAsPng(png);
         return new MemoryImage(png.ToArray());
     }
@@ -112,14 +112,14 @@ public static class DdsTextures
         failure = null;
         try
         {
-            var texture = new Texture2D(export);
+            Texture2D texture = new Texture2D(export);
             PixelFormat format = LexImage.getPixelFormatType(texture.TextureFormat);
             if (!Writable(format))
             {
                 failure = $"format {format}";
                 return null;
             }
-            var mips = new List<Mip>();
+            List<Mip> mips = new List<Mip>();
             foreach (Texture2DMipInfo mip in texture.Mips.Where(m => m.width <= maxWidth))
             {
                 if (mip.storageType == StorageTypes.empty)
@@ -151,7 +151,7 @@ public static class DdsTextures
         try
         {
             // ImageSharp reads any PNG (LEX's loader rejects some, e.g. 16-bit ones).
-            using var decoded = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Bgra32>(png.Content.Span);
+            using Image<Bgra32> decoded = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Bgra32>(png.Content.Span);
             byte[] pixels = new byte[decoded.Width * decoded.Height * 4];
             decoded.CopyPixelDataTo(pixels);
             return EncodeBgra(pixels, decoded.Width, decoded.Height, normalMap);
@@ -170,7 +170,7 @@ public static class DdsTextures
         try
         {
             PixelFormat format = normalMap ? PixelFormat.BC5 : HasAlpha(pixels) ? PixelFormat.DXT5 : PixelFormat.DXT1;
-            var mips = new List<Mip>();
+            List<Mip> mips = new List<Mip>();
             while (true)
             {
                 mips.Add(new Mip(TexConverter.ConvertTexture(pixels, (uint)width, (uint)height, PixelFormat.ARGB, format), width, height));
@@ -203,7 +203,7 @@ public static class DdsTextures
     {
         int w = Math.Max(1, width / 2), h = Math.Max(1, height / 2);
         int stepX = width > 1 ? 2 : 1, stepY = height > 1 ? 2 : 1;
-        var half = new byte[w * h * 4];
+        byte[] half = new byte[w * h * 4];
         for (int y = 0; y < h; y++)
         {
             for (int x = 0; x < w; x++)
@@ -249,8 +249,8 @@ public static class DdsTextures
     // (which samples as gray, as D3D9's L8 did) with the legacy one. Sampling decides sRGB.
     private static byte[] WriteDds(List<Mip> mips, PixelFormat format)
     {
-        using var stream = new MemoryStream();
-        using var writer = new BinaryWriter(stream);
+        using MemoryStream stream = new MemoryStream();
+        using BinaryWriter writer = new BinaryWriter(stream);
         writer.Write(0x20534444u);  // "DDS "
         writer.Write(124u);  // header size
         // Caps, height, width, pixel format, mipmap count, linear size.

@@ -104,7 +104,7 @@ public class TextureCache
     // a human skin tone that would turn an asari pink.
     public void AddOverrides(ExportEntry materialOverride, bool keepSkinTone = false)
     {
-        var props = materialOverride.GetProperties();
+        PropertyCollection props = materialOverride.GetProperties();
         foreach (StructProperty p in props.GetProp<ArrayProperty<StructProperty>>("m_aTextureOverrides") ?? Enumerable.Empty<StructProperty>())
         {
             string name = p.GetProp<NameProperty>("nName")?.Value.Instanced;
@@ -137,15 +137,15 @@ public class TextureCache
         if (_materials.TryGetValue(key, out MaterialBuilder cached))
             return cached;
 
-        var builder = new MaterialBuilder(material?.ObjectName.Instanced ?? fallbackName)
+        MaterialBuilder builder = new MaterialBuilder(material?.ObjectName.Instanced ?? fallbackName)
             .WithMetallicRoughnessShader()
             .WithMetallicRoughness(0f, 0.7f);
 
-        var textures = new Dictionary<string, ExportEntry>(StringComparer.OrdinalIgnoreCase);
-        var colors = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
-        var scalars = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, ExportEntry> textures = new Dictionary<string, ExportEntry>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, Vector3> colors = new Dictionary<string, Vector3>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, float> scalars = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         // Vector parameters' alpha, which the translated shaders read (colors keep RGB only).
-        var alphas = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, float> alphas = new Dictionary<string, float>(StringComparer.OrdinalIgnoreCase);
         if (material != null)
             ReadParameters(material, textures, colors, scalars, alphas);
 
@@ -189,12 +189,12 @@ public class TextureCache
 
         // A texture override only replaces a parameter the material actually has (the face
         // diffuse must not leak into the eyes); colors are looked up by name, so they all apply.
-        foreach (var (name, tex) in _textureOverrides)
+        foreach ((string name, ExportEntry tex) in _textureOverrides)
         {
             if (textures.ContainsKey(name))
                 textures[name] = tex;
         }
-        foreach (var (name, color) in _colorOverrides)
+        foreach ((string name, Vector3 color) in _colorOverrides)
             colors[name] = color;
 
         MemoryImage? image = null;
@@ -236,7 +236,7 @@ public class TextureCache
         }
 
         // The base material decides cutout, two-sidedness (grates, foliage, signs), and lighting.
-        var baseProps = baseMaterial?.GetProperties();
+        PropertyCollection baseProps = baseMaterial?.GetProperties();
         string blendMode = baseProps?.GetProp<EnumProperty>("BlendMode")?.Value.Instanced ?? "BLEND_Opaque";
         // A shader bake knows its own cutout (and the effects user isn't a Material).
         if (blendMode == "BLEND_Masked" && recipe != "shader")
@@ -343,7 +343,7 @@ public class TextureCache
             .WithBaseColor(new Vector4(Vector3.Clamp(color, Vector3.Zero, Vector3.One), Math.Clamp(opacity, 0f, 1f) * 0.25f))
             .WithAlpha(AlphaMode.BLEND);
         // Kept beside the translation AddTranslatedShader may already have stored.
-        var extras = builder.Extras as JsonObject ?? new JsonObject();
+        JsonObject extras = builder.Extras as JsonObject ?? new JsonObject();
         extras["me_shader"] = "volumetric";
         extras["color"] = new JsonArray(color.X, color.Y, color.Z);
         extras["opacity"] = opacity;
@@ -362,7 +362,7 @@ public class TextureCache
     {
         for (ExportEntry current = material; current != null;)
         {
-            var props = current.GetProperties();
+            PropertyCollection props = current.GetProperties();
             foreach (StructProperty p in props.GetProp<ArrayProperty<StructProperty>>("TextureParameterValues") ?? Enumerable.Empty<StructProperty>())
             {
                 string name = p.GetProp<NameProperty>("ParameterName")?.Value.Instanced;
@@ -405,7 +405,7 @@ public class TextureCache
     {
         for (ExportEntry current = material; current != null && current != master;)
         {
-            var props = current.GetProperties();
+            PropertyCollection props = current.GetProperties();
             foreach (StructProperty p in props.GetProp<ArrayProperty<StructProperty>>("TextureParameterValues") ?? Enumerable.Empty<StructProperty>())
             {
                 if (p.GetProp<NameProperty>("ParameterName")?.Value.Instanced == "HED_Lash_Diff"
@@ -417,7 +417,7 @@ public class TextureCache
         foreach (ObjectProperty expression in master.GetProperties().GetProp<ArrayProperty<ObjectProperty>>("Expressions") ?? Enumerable.Empty<ObjectProperty>())
         {
             if (master.FileRef.TryGetUExport(expression.Value, out ExportEntry sample)
-                && sample.GetProperties() is var props && props.GetProp<NameProperty>("ParameterName")?.Value.Instanced == "HED_Lash_Diff")
+                && sample.GetProperties() is PropertyCollection props && props.GetProp<NameProperty>("ParameterName")?.Value.Instanced == "HED_Lash_Diff")
                 return Own(master.FileRef, props.GetProp<ObjectProperty>("Texture")?.Value ?? 0);
         }
         return null;
@@ -479,17 +479,17 @@ public class TextureCache
             (float)outputs[2].Terms.GetValueOrDefault(term), (float)outputs[3].Terms.GetValueOrDefault(term));
 
         // The main UVs: the first-UV-set tiling that carries the most weight.
-        var main = shader.Samples
+        IGrouping<(float ScaleU, float ScaleV), KeyValuePair<string, ShaderAnalysis.Sample>> main = shader.Samples
             .Where(s => s.Value.Uv0)
             .GroupBy(s => (s.Value.ScaleU, s.Value.ScaleV))
             .OrderByDescending(g => g.Sum(s => Weights(s.Key).Length()))
             .FirstOrDefault();
 
-        var constant = new Vector4((float)outputs[0].Constant, (float)outputs[1].Constant, (float)outputs[2].Constant, (float)outputs[3].Constant);
-        var terms = new List<MaterialBaker.ChannelTerm>();
-        var used = new HashSet<string>();
-        var averaged = new List<string>();
-        foreach (var (name, sample) in shader.Samples)
+        Vector4 constant = new Vector4((float)outputs[0].Constant, (float)outputs[1].Constant, (float)outputs[2].Constant, (float)outputs[3].Constant);
+        List<MaterialBaker.ChannelTerm> terms = new List<MaterialBaker.ChannelTerm>();
+        HashSet<string> used = new HashSet<string>();
+        List<string> averaged = new List<string>();
+        foreach ((string name, ShaderAnalysis.Sample sample) in shader.Samples)
         {
             ExportEntry texture = sample.Slot < (shader.Textures?.Length ?? 0) ? TextureFor(shader.Textures[sample.Slot], baseMaterial, textures) : null;
             if (texture == null)
@@ -503,7 +503,7 @@ public class TextureCache
                 averaged.Add(name);
             }
         }
-        var dropped = outputs.SelectMany(o => o.Terms.Keys).Distinct().Where(t => !used.Contains(t)).ToList();
+        List<string> dropped = outputs.SelectMany(o => o.Terms.Keys).Distinct().Where(t => !used.Contains(t)).ToList();
         string summary = $"color ({outputs[0]} | {outputs[1]} | {outputs[2]}), opacity {outputs[3]}";
 
         // Opacity made only of things left out (scene depth fades, view angles) would bake as
@@ -516,7 +516,7 @@ public class TextureCache
         if (image.HasValue)
         {
             builder.WithChannelImage(KnownChannel.BaseColor, image.Value);
-            var (u, v) = main.Key;
+            (float u, float v) = main.Key;
             if (u != 1f || v != 1f)
                 builder.UseChannel(KnownChannel.BaseColor).Texture.WithTransform(Vector2.Zero, new Vector2(u, v));
         }
@@ -667,11 +667,11 @@ public class TextureCache
         if (map == null)
             return ", no shader to translate";
 
-        var slotTextures = new Dictionary<int, ExportEntry>();
+        Dictionary<int, ExportEntry> slotTextures = new Dictionary<int, ExportEntry>();
         ExportEntry Slot(int slot) =>
             slotTextures.TryGetValue(slot, out ExportEntry t) ? t
             : slotTextures[slot] = slot < (map.Uniform2DTextureExpressions?.Length ?? 0) ? TextureFor(map.Uniform2DTextureExpressions[slot], baseMaterial, textures, defaults) : null;
-        var cubeTextures = new Dictionary<int, ExportEntry>();
+        Dictionary<int, ExportEntry> cubeTextures = new Dictionary<int, ExportEntry>();
         ExportEntry Cube(int slot) =>
             cubeTextures.TryGetValue(slot, out ExportEntry t) ? t
             : cubeTextures[slot] = slot < (map.UniformCubeTextureExpressions?.Length ?? 0) ? CubeFor(map.UniformCubeTextureExpressions[slot], baseMaterial, textures, defaults) : null;
@@ -683,23 +683,23 @@ public class TextureCache
             : Info(null) with { Black = true };
         ShaderTranslator.TextureInfo Info(ExportEntry texture)
         {
-            var props = texture?.GetProperties();
+            PropertyCollection props = texture?.GetProperties();
             return new ShaderTranslator.TextureInfo(
                 props?.GetProp<BoolProperty>("SRGB")?.Value ?? true,
                 props?.GetProp<EnumProperty>("AddressX")?.Value.Instanced is not ("TA_Clamp"));
         }
         ShaderTranslator.TextureInfo CubeInfo(ExportEntry cube) => Info(CubeFaces(cube)?.FirstOrDefault(f => f != null));
 
-        var extras = new JsonObject();
-        var used = new { Textures = new SortedSet<int>(), Cubes = new SortedSet<int>(), Vectors = new SortedSet<int>(), Scalars = new SortedSet<int>(),
-            Cutouts = new SortedSet<int>() };
-        var notes = new List<string>();
+        JsonObject extras = new JsonObject();
+        (SortedSet<int> Textures, SortedSet<int> Cubes, SortedSet<int> Vectors, SortedSet<int> Scalars, SortedSet<int> Cutouts) used =
+            (new SortedSet<int>(), new SortedSet<int>(), new SortedSet<int>(), new SortedSet<int>(), new SortedSet<int>());
+        List<string> notes = new List<string>();
         if (staticNote != null)
             notes.Add(staticNote);
         foreach (ShaderTranslator.Policy policy in policies)
         {
             string type = ShaderTranslator.ShaderType(policy);
-            var reference = map.MeshShaderMaps
+            ShaderReference reference = map.MeshShaderMaps
                 .Where(m => m.VertexFactoryType.Instanced == "FLocalVertexFactory")
                 .SelectMany(m => m.Shaders)
                 .FirstOrDefault(s => s.Key.Instanced == type).Value;
@@ -736,7 +736,7 @@ public class TextureCache
         if (translatedKeys.Length == 0)
             return ", shader not translated (" + string.Join("; ", notes) + ")";
 
-        var parameters = new JsonObject();
+        JsonObject parameters = new JsonObject();
         foreach (int slot in used.Textures)
         {
             ExportEntry texture = Slot(slot);
@@ -765,7 +765,7 @@ public class TextureCache
             : scalars.TryGetValue(name, out float f) ? [f]
             : null;
         // Values at time 0, and the GLSL of those that change.
-        var animated = new JsonObject();
+        JsonObject animated = new JsonObject();
         bool frozen = false;
         void Uniform(string name, MaterialUniformExpression[] expressions, int slot, bool vector)
         {
@@ -836,7 +836,7 @@ public class TextureCache
             extras["lit"] = true;
         // How the unlit translation blends: BLEND_Translucent (alpha) or BLEND_Additive.
         extras["blend"] = baseMaterial.GetProperties().GetProp<EnumProperty>("BlendMode")?.Value.Instanced ?? "BLEND_Opaque";
-        var all = builder.Extras as JsonObject ?? new JsonObject();
+        JsonObject all = builder.Extras as JsonObject ?? new JsonObject();
         all["me_material"] = extras;
         builder.Extras = all;
 
@@ -854,7 +854,7 @@ public class TextureCache
         defaults ??= Defaults.Of(baseMaterial);
         if (defaults.Texture(expression.TextureIndex) is not ExportEntry book || book.ClassName != "TextureFlipBook")
             return null;
-        var props = book.GetProperties();
+        PropertyCollection props = book.GetProperties();
         int columns = Math.Max(props.GetProp<IntProperty>("HorizontalImages")?.Value ?? 1, 1);
         int rows = Math.Max(props.GetProp<IntProperty>("VerticalImages")?.Value ?? 1, 1);
         float rate = props.GetProp<FloatProperty>("FrameRate")?.Value ?? 4f;
@@ -911,7 +911,7 @@ public class TextureCache
     {
         if (cube == null)
             return null;
-        var props = cube.GetProperties();
+        PropertyCollection props = cube.GetProperties();
         return new[] { "FacePosX", "FaceNegX", "FacePosY", "FaceNegY", "FacePosZ", "FaceNegZ" }
             .Select(name => _pcc.TryGetUExport(props.GetProp<ObjectProperty>(name)?.Value ?? 0, out ExportEntry face) ? face : null)
             .ToArray();
@@ -937,7 +937,7 @@ public class TextureCache
     // -> STA60_FLOOR01_Norm) over shared detail and overlay maps.
     private static ExportEntry PickMap(List<ExportEntry> candidates, Regex kind, ExportEntry diffuse)
     {
-        var maps = candidates.Where(t => kind.IsMatch(t.ObjectName.Instanced) && !NotSurfaceMapName.IsMatch(t.ObjectName.Instanced)).ToList();
+        List<ExportEntry> maps = candidates.Where(t => kind.IsMatch(t.ObjectName.Instanced) && !NotSurfaceMapName.IsMatch(t.ObjectName.Instanced)).ToList();
         string diffuseName = diffuse?.ObjectName.Instanced;
         int cut = diffuseName?.LastIndexOf('_') ?? -1;
         if (cut > 0)
@@ -990,7 +990,7 @@ public class TextureCache
     private ExportEntry GuessDiffuseTexture(ExportEntry material, IEnumerable<ExportEntry> parameterTextures)
     {
         List<ExportEntry> candidates = CandidateTextures(material, parameterTextures);
-        var usable = candidates.Where(t => !NotDiffuseName.IsMatch(t.ObjectName.Instanced)).ToList();
+        List<ExportEntry> usable = candidates.Where(t => !NotDiffuseName.IsMatch(t.ObjectName.Instanced)).ToList();
         return usable.FirstOrDefault(t => DiffuseName.IsMatch(t.ObjectName.Instanced)) ?? usable.FirstOrDefault();
     }
 
@@ -998,13 +998,13 @@ public class TextureCache
     private List<ExportEntry> CandidateTextures(ExportEntry material, IEnumerable<ExportEntry> parameterTextures)
     {
         // Realtime reflections' render targets hold no image.
-        var candidates = new List<ExportEntry>(parameterTextures.Where(t => !t.ClassName.Contains("RenderTarget")));
+        List<ExportEntry> candidates = new List<ExportEntry>(parameterTextures.Where(t => !t.ClassName.Contains("RenderTarget")));
         ExportEntry baseMaterial = BaseMaterial(material);
         if (baseMaterial != null)
         {
             try
             {
-                var binary = ObjectBinary.From<Material>(baseMaterial);
+                Material binary = ObjectBinary.From<Material>(baseMaterial);
                 foreach (int uIndex in binary.SM3MaterialResource?.UniformExpressionTextures ?? [])
                 {
                     if (_pcc.TryGetUExport(uIndex, out ExportEntry tex) && tex.ClassName == "Texture2D")
@@ -1034,7 +1034,7 @@ public class TextureCache
         MemoryImage? image = null;
         try
         {
-            var texture2D = new Texture2D(texture);
+            Texture2D texture2D = new Texture2D(texture);
             // Mips are listed largest first; some are empty or point at data a smaller mip
             // doesn't need, so the next one down is tried.
             foreach (Texture2DMipInfo mip in EmbeddableMips(texture2D))
@@ -1061,7 +1061,7 @@ public class TextureCache
     {
         try
         {
-            var texture2D = new Texture2D(texture);
+            Texture2D texture2D = new Texture2D(texture);
             foreach (Texture2DMipInfo mip in EmbeddableMips(texture2D))
             {
                 if (MaterialBaker.Pixels.FromMip(texture, texture2D, mip) is MaterialBaker.Pixels pixels)
@@ -1079,8 +1079,8 @@ public class TextureCache
     // one when none fits (a texture cooked without mips, such as the Wards' 4096 px sky).
     private IEnumerable<Texture2DMipInfo> EmbeddableMips(Texture2D texture2D)
     {
-        var mips = texture2D.Mips.Where(m => m.storageType != StorageTypes.empty).ToList();
-        var fitting = mips.Where(m => MaxTextureSize <= 0 || (m.width <= MaxTextureSize && m.height <= MaxTextureSize)).ToList();
+        List<Texture2DMipInfo> mips = texture2D.Mips.Where(m => m.storageType != StorageTypes.empty).ToList();
+        List<Texture2DMipInfo> fitting = mips.Where(m => MaxTextureSize <= 0 || (m.width <= MaxTextureSize && m.height <= MaxTextureSize)).ToList();
         return fitting.Count > 0 ? fitting : mips.Take(1);
     }
 }

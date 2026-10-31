@@ -48,8 +48,8 @@ public static class MaterialBaker
                 bool stripeSrgb = st != null && IsSrgb(st);
                 bool diffSrgb = IsSrgb(diffStack);
 
-                var channels = new Vector3[3];
-                var tints = new Vector3[3];
+                Vector3[] channels = new Vector3[3];
+                Vector3[] tints = new Vector3[3];
                 for (int i = 0; i < 3; i++)
                 {
                     channels[i] = Color($"TNT_Param_0{i + 1}", Vector3.Zero);
@@ -86,7 +86,7 @@ public static class MaterialBaker
             // ME2 tint stack (quarian suits): each diffuse channel is the shading of one tint
             // color's region, so the color is their weighted sum. Alpha isn't sRGB-encoded.
             recipe = "tint stack";
-            var stack = new Vector3[4];
+            Vector3[] stack = new Vector3[4];
             for (int i = 0; i < 4; i++)
                 stack[i] = Color($"TNT_Colour_0{i + 1}", Vector3.One);
             return diff.Map((_, _, d) =>
@@ -153,7 +153,7 @@ public static class MaterialBaker
     public static MemoryImage? BakeTranslucent(List<ChannelTerm> terms, Vector4 constant, out float scale)
     {
         scale = 1f;
-        var layers = terms
+        List<(ChannelTerm Term, Pixels Pixels, bool Srgb)> layers = terms
             .Select(t => (Term: t, Pixels: Cached(t.Texture), Srgb: IsSrgb(t.Texture)))
             .Where(l => l.Pixels != null)
             .ToList();
@@ -164,7 +164,7 @@ public static class MaterialBaker
         Vector4 Shade(int x, int y)
         {
             Vector4 value = constant;
-            foreach (var (term, pixels, srgb) in layers)
+            foreach ((ChannelTerm term, Pixels pixels, bool srgb) in layers)
             {
                 float c = Channel(pixels.Sample(x, y, canvas), term.Channel);
                 value += term.Weights * (srgb && term.Channel < 3 ? Linear(c) : c);
@@ -298,7 +298,7 @@ public static class MaterialBaker
 
         private static Pixels FromBgra(byte[] bytes, int width, int height)
         {
-            var pixels = new Pixels { Width = width, Height = height, Data = new Vector4[width * height] };
+            Pixels pixels = new Pixels { Width = width, Height = height, Data = new Vector4[width * height] };
             for (int i = 0; i < pixels.Data.Length; i++)
                 pixels.Data[i] = new Rgba32(bytes[i * 4 + 2], bytes[i * 4 + 1], bytes[i * 4], bytes[i * 4 + 3]).ToVector4();
             return pixels;
@@ -308,9 +308,9 @@ public static class MaterialBaker
         // export for DXT1/5, BC5, and BC7); null when LEX can't, or the size doesn't add up.
         private static Pixels FromArgb(ExportEntry texture)
         {
-            var texture2D = new Texture2D(texture);
+            Texture2D texture2D = new Texture2D(texture);
             Texture2DMipInfo top = texture2D.GetTopMip();
-            using var argb = new MemoryStream();
+            using MemoryStream argb = new MemoryStream();
             if (top == null || !texture2D.ExportToARGB(argb) || argb.Length != (long)top.width * top.height * 4)
                 return null;
             return FromBgra(argb.GetBuffer(), top.width, top.height);
@@ -319,19 +319,19 @@ public static class MaterialBaker
         // LEX's raw image path rejects some LE formats, but its PNG export handles them all.
         private static Pixels FromPngExport(ExportEntry texture)
         {
-            using var png = new MemoryStream();
+            using MemoryStream png = new MemoryStream();
             if (!new Texture2D(texture).ExportToPNG(outStream: png))
                 throw new InvalidDataException("PNG export failed");
-            using var image = SixLabors.ImageSharp.Image.Load<Rgba32>(png.ToArray());
+            using Image<Rgba32> image = SixLabors.ImageSharp.Image.Load<Rgba32>(png.ToArray());
             return FromImage(image);
         }
 
         // One bulk copy out of the image instead of its per-pixel indexer.
         private static Pixels FromImage(Image<Rgba32> image)
         {
-            var raw = new Rgba32[image.Width * image.Height];
+            Rgba32[] raw = new Rgba32[image.Width * image.Height];
             image.CopyPixelDataTo(raw);
-            var pixels = new Pixels { Width = image.Width, Height = image.Height, Data = new Vector4[raw.Length] };
+            Pixels pixels = new Pixels { Width = image.Width, Height = image.Height, Data = new Vector4[raw.Length] };
             for (int i = 0; i < raw.Length; i++)
                 pixels.Data[i] = raw[i].ToVector4();
             return pixels;
@@ -340,7 +340,7 @@ public static class MaterialBaker
         // Box-filtered half-size copy.
         internal Pixels Half()
         {
-            var half = new Pixels { Width = Width / 2, Height = Height / 2 };
+            Pixels half = new Pixels { Width = Width / 2, Height = Height / 2 };
             half.Data = new Vector4[half.Width * half.Height];
             for (int y = 0; y < half.Height; y++)
             {
@@ -360,7 +360,7 @@ public static class MaterialBaker
         // Runs a per-pixel function returning linear RGB + alpha and encodes the result as DDS.
         public MemoryImage Map(Func<int, int, Vector4, Vector4> shade)
         {
-            var result = new Rgba32[Width * Height];
+            Rgba32[] result = new Rgba32[Width * Height];
             Parallel.For(0, Height, ParallelLimits.Options, y =>
             {
                 for (int x = 0; x < Width; x++)
@@ -377,7 +377,7 @@ public static class MaterialBaker
         // without sRGB encoding.
         public MemoryImage MapRaw(Func<int, int, Vector4, Vector4> shade, bool normalMap = false)
         {
-            var result = new Rgba32[Width * Height];
+            Rgba32[] result = new Rgba32[Width * Height];
             Parallel.For(0, Height, ParallelLimits.Options, y =>
             {
                 for (int x = 0; x < Width; x++)

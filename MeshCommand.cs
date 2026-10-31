@@ -42,14 +42,14 @@ public static class MeshCommand
     // "--vfx <BioWeaponVFXAppearance>" adds a gun's effects (WeaponVfx).
     public static int Run(string packagePath, string outPath, string[] args)
     {
-        var meshPaths = new List<string>();
-        var materialSwaps = new Dictionary<int, string[]>();
-        var morphs = new List<string>();
-        var hidden = new List<string>();
-        var pawnOverrides = new List<string>();
-        var anims = new List<(string Path, string Clip, string Package, List<string> Bind)>();
+        List<string> meshPaths = new List<string>();
+        Dictionary<int, string[]> materialSwaps = new Dictionary<int, string[]>();
+        List<string> morphs = new List<string>();
+        List<string> hidden = new List<string>();
+        List<string> pawnOverrides = new List<string>();
+        List<(string Path, string Clip, string Package, List<string> Bind)> anims = new List<(string Path, string Clip, string Package, List<string> Bind)>();
         // Per --anim index: the (pose, base) of its additive, each "path[@package.pcc]".
-        var additives = new Dictionary<int, (string Pose, string Base)>();
+        Dictionary<int, (string Pose, string Base)> additives = new Dictionary<int, (string Pose, string Base)>();
         (string Path, string Package)? check = null;
         bool sounds = false;
         string vfx = null;
@@ -92,14 +92,14 @@ public static class MeshCommand
         }
 
         using IMEPackage pcc = MEPackageHandler.OpenMEPackage(packagePath);
-        var skeleton = new MergedSkeleton();
-        var parts = new List<(string Name, SkeletalMesh Mesh)>();
-        var textures = new TextureCache(pcc, hidden) { BakeShaders = true, ResolveImports = true };
+        MergedSkeleton skeleton = new MergedSkeleton();
+        List<(string Name, SkeletalMesh Mesh)> parts = new List<(string Name, SkeletalMesh Mesh)>();
+        TextureCache textures = new TextureCache(pcc, hidden) { BakeShaders = true, ResolveImports = true };
 
         for (int m = 0; m < meshPaths.Count; m++)
         {
             ExportEntry export = FindExport(pcc, meshPaths[m], "SkeletalMesh");
-            var mesh = ObjectBinary.From<SkeletalMesh>(export);
+            SkeletalMesh mesh = ObjectBinary.From<SkeletalMesh>(export);
             if (materialSwaps.TryGetValue(m, out string[] swaps))
             {
                 for (int s = 0; s < swaps.Length && s < mesh.Materials.Length; s++)
@@ -108,11 +108,11 @@ public static class MeshCommand
             parts.Add((export.ObjectName.Instanced, mesh));
         }
 
-        var faceBones = new List<BoneOffset>();
+        List<BoneOffset> faceBones = new List<BoneOffset>();
         foreach (string morphPath in morphs)
         {
             ExportEntry export = FindExport(pcc, morphPath, "BioMorphFace");
-            var morph = new BioMorphFace(export);
+            BioMorphFace morph = new BioMorphFace(export);
             parts.Add((morph.m_oBaseHead.ObjectName.Instanced, MorphFace.Apply(morph)));
             faceBones.AddRange(morph.BoneOffsets);
             if (morph.HairMesh != null)
@@ -124,7 +124,7 @@ public static class MeshCommand
 
         // Merged once every part is in, with the face bones where the morph puts them on every
         // mesh that has them, so no part's base positions win the merge.
-        foreach (var (_, mesh) in parts)
+        foreach ((string _, SkeletalMesh mesh) in parts)
         {
             MorphFace.ApplyBoneOffsets(mesh, faceBones);
             skeleton.Add(mesh.RefSkeleton);
@@ -132,7 +132,7 @@ public static class MeshCommand
 
 
         // Other packages holding clips, opened once each.
-        var animPackages = new Dictionary<string, IMEPackage>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, IMEPackage> animPackages = new Dictionary<string, IMEPackage>(StringComparer.OrdinalIgnoreCase);
         IMEPackage PackageFor(string file)
         {
             if (file == null)
@@ -160,15 +160,15 @@ public static class MeshCommand
             }
 
             NodeBuilder[] joints = skeleton.BuildNodes(out NodeBuilder armature);
-            var extras = new JsonObject();
-            var clipSounds = new JsonObject();
-            var soundCache = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
+            JsonObject extras = new JsonObject();
+            JsonObject clipSounds = new JsonObject();
+            Dictionary<string, JsonObject> soundCache = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
             string outDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
             for (int a = 0; a < anims.Count; a++)
             {
-                var (animPath, clip, package, bind) = anims[a];
+                (string animPath, string clip, string package, List<string> bind) = anims[a];
                 AnimationBaker.AdditivePose additive = null;
-                if (additives.TryGetValue(a, out var pair))
+                if (additives.TryGetValue(a, out (string Pose, string Base) pair))
                 {
                     string[] pose = pair.Pose.Split('@', 2);
                     string[] from = pair.Base.Split('@', 2);
@@ -207,10 +207,10 @@ public static class MeshCommand
     private static int Write(string outPath, MergedSkeleton skeleton, List<(string Name, SkeletalMesh Mesh)> parts,
         NodeBuilder armature, NodeBuilder[] joints, TextureCache textures)
     {
-        var scene = new SceneBuilder();
+        SceneBuilder scene = new SceneBuilder();
         scene.AddNode(armature);
 
-        foreach (var (name, mesh) in parts)
+        foreach ((string name, SkeletalMesh mesh) in parts)
             scene.AddSkinnedMesh(BuildMesh(name, mesh, skeleton, textures), Matrix4x4.Identity, joints);
 
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
@@ -232,7 +232,7 @@ public static class MeshCommand
 
         // Vertex index -> owning chunk; a chunk's BoneMap turns its local influence indices
         // into mesh bone indices.
-        var chunkOf = new SkelMeshChunk[verts.Length];
+        SkelMeshChunk[] chunkOf = new SkelMeshChunk[verts.Length];
         foreach (SkelMeshChunk chunk in lod.Chunks)
         {
             int count = chunk.NumRigidVertices + chunk.NumSoftVertices;
@@ -240,10 +240,10 @@ public static class MeshCommand
                 chunkOf[chunk.BaseVertexIndex + v] = chunk;
         }
 
-        var positions = new Vector3[verts.Length];
-        var normals = new Vector3[verts.Length];
-        var tangents = new Vector4[verts.Length];
-        var uvs = new Vector2[verts.Length];
+        Vector3[] positions = new Vector3[verts.Length];
+        Vector3[] normals = new Vector3[verts.Length];
+        Vector4[] tangents = new Vector4[verts.Length];
+        Vector2[] uvs = new Vector2[verts.Length];
         for (int v = 0; v < verts.Length; v++)
         {
             positions[v] = UnrealSpace.Position(verts[v].Position);
@@ -264,19 +264,19 @@ public static class MeshCommand
         Console.WriteLine($"{name}: {verts.Length} verts, {indices.Length / 3} tris, {lod.Sections.Length} sections, "
             + $"{(lod.DataTypeSize == 4 ? "32" : "16")}-bit indices, winding {(flip ? "flipped" : "kept")}.");
 
-        var vertexCache = new VERTEX[verts.Length];
+        VERTEX[] vertexCache = new VERTEX[verts.Length];
         for (int v = 0; v < verts.Length; v++)
             vertexCache[v] = MakeVertex(verts[v], chunkOf[v], positions[v], normals[v], tangents[v], jointOf);
 
         CheckBindPose(name, vertexCache, skeleton);
 
-        var builder = new MeshBuilder<VertexPositionNormalTangent, VertexTexture1, VertexJoints4>(name);
+        MeshBuilder<VertexPositionNormalTangent, VertexTexture1, VertexJoints4> builder = new MeshBuilder<VertexPositionNormalTangent, VertexTexture1, VertexJoints4>(name);
         foreach (SkelMeshSection section in lod.Sections)
         {
             int materialUIndex = section.MaterialIndex < mesh.Materials.Length ? mesh.Materials[section.MaterialIndex] : 0;
             if (textures.IsHidden(materialUIndex))
                 continue;
-            var primitive = builder.UsePrimitive(textures.MaterialFor(materialUIndex, $"{name}_mat{section.MaterialIndex}"));
+            PrimitiveBuilder<MaterialBuilder, VertexPositionNormalTangent, VertexTexture1, VertexJoints4> primitive = builder.UsePrimitive(textures.MaterialFor(materialUIndex, $"{name}_mat{section.MaterialIndex}"));
             int triangles = SectionTriangles(name, section, indices.Length);
             for (int t = 0; t < triangles; t++)
             {
@@ -313,7 +313,7 @@ public static class MeshCommand
         ushort[] raw = lod.IndexBuffer;
         if (lod.DataTypeSize != 4)
             return raw.Select(i => (uint)i).ToArray();
-        var result = new uint[raw.Length / 2];
+        uint[] result = new uint[raw.Length / 2];
         for (int i = 0; i < result.Length; i++)
             result[i] = raw[i * 2] | ((uint)raw[i * 2 + 1] << 16);
         return result;
@@ -321,7 +321,7 @@ public static class MeshCommand
 
     private static VERTEX MakeVertex(GPUSkinVertex v, SkelMeshChunk chunk, Vector3 position, Vector3 normal, Vector4 tangent, int[] jointOf)
     {
-        var influences = new List<(int Joint, float Weight)>(4);
+        List<(int Joint, float Weight)> influences = new List<(int Joint, float Weight)>(4);
         for (int k = 0; k < 4; k++)
         {
             byte weight = v.InfluenceWeights[k];
@@ -400,16 +400,16 @@ public static class MeshCommand
     // convention puts limbs tens of centimetres off.
     private static void CheckBindPose(string name, VERTEX[] verts, MergedSkeleton skeleton)
     {
-        var sums = new Dictionary<int, (Vector3 Sum, int Count)>();
+        Dictionary<int, (Vector3 Sum, int Count)> sums = new Dictionary<int, (Vector3 Sum, int Count)>();
         foreach (VERTEX v in verts)
         {
-            var (joint, weight) = v.Skinning.GetBinding(0);
+            (int joint, float weight) = v.Skinning.GetBinding(0);
             if (weight < 0.9f)
                 continue;
-            sums.TryGetValue(joint, out var s);
+            sums.TryGetValue(joint, out (Vector3 Sum, int Count) s);
             sums[joint] = (s.Sum + v.Geometry.Position, s.Count + 1);
         }
-        var gaps = sums.Where(kv => kv.Value.Count >= 10)
+        List<(string Bone, float Gap)> gaps = sums.Where(kv => kv.Value.Count >= 10)
             .Select(kv => (Bone: skeleton.Bones[kv.Key].Name,
                            Gap: Vector3.Distance(kv.Value.Sum / kv.Value.Count, skeleton.BindWorldPosition(kv.Key))))
             .OrderByDescending(x => x.Gap)

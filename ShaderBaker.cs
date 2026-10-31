@@ -76,8 +76,8 @@ public static class ShaderBaker
             failure = $"no skinned shader for {baseMaterial.ObjectName.Instanced}";
             return null;
         }
-        var shaders = map.MeshShaderMaps.Where(s => s.VertexFactoryType.Instanced == VertexFactory).SelectMany(s => s.Shaders.Select(kv => kv)).ToList();  // through Select: LEX's UMap.CopyTo is broken
-        var reference = shaders.FirstOrDefault(s => s.Key.Instanced == ShaderType).Value
+        List<KeyValuePair<NameReference, ShaderReference>> shaders = map.MeshShaderMaps.Where(s => s.VertexFactoryType.Instanced == VertexFactory).SelectMany(s => s.Shaders.Select(kv => kv)).ToList();  // through Select: LEX's UMap.CopyTo is broken
+        ShaderReference reference = shaders.FirstOrDefault(s => s.Key.Instanced == ShaderType).Value
             ?? shaders.FirstOrDefault(s => s.Key.Instanced.StartsWith("TBasePassPixelShaderFNoLightMapPolicy")).Value;
         if (reference == null || !cache.Shaders.TryGetValue(reference.Id, out Shader shader))
         {
@@ -103,7 +103,7 @@ public static class ShaderBaker
         }
 
         // The specular's shader, when the material was cooked for light environments.
-        var lightReference = shaders.FirstOrDefault(s => s.Key.Instanced == LightShaderType).Value;
+        ShaderReference lightReference = shaders.FirstOrDefault(s => s.Key.Instanced == LightShaderType).Value;
         Program lightProgram = null;
         string specularNote = "";
         if (lightReference == null || !cache.Shaders.TryGetValue(lightReference.Id, out Shader lightShader))
@@ -124,7 +124,7 @@ public static class ShaderBaker
 
         // Textures by shader slot: an instance parameter, else the base material's default.
         int[] defaults = ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
-        var slotTextures = new Dictionary<int, ExportEntry>();
+        Dictionary<int, ExportEntry> slotTextures = new Dictionary<int, ExportEntry>();
         // The specular shader may sample maps the base pass doesn't (a specular power map).
         foreach (int slot in program.TextureSlots.Union(lightProgram?.TextureSlots ?? []))
         {
@@ -170,8 +170,8 @@ public static class ShaderBaker
         }
 
         // Each texture decodes on its own thread; they're independent.
-        var slots = new Dictionary<int, Texels>();
-        foreach (var (slot, texture) in slotTextures)
+        Dictionary<int, Texels> slots = new Dictionary<int, Texels>();
+        foreach ((int slot, ExportEntry texture) in slotTextures)
             slots[slot] = null;
         Parallel.ForEach(slotTextures.Where(kv => kv.Value != null).ToArray(), ParallelLimits.Options, kv =>
         {
@@ -194,18 +194,18 @@ public static class ShaderBaker
             height /= 2;
         }
 
-        var albedo = new Rgba32[width * height];
-        var normal = new Rgba32[width * height];
-        var emissive = new Rgba32[width * height];
+        Rgba32[] albedo = new Rgba32[width * height];
+        Rgba32[] normal = new Rgba32[width * height];
+        Rgba32[] emissive = new Rgba32[width * height];
         bool cutout = false, hasNormal = program.Writes(2), hasEmissive = false;
-        var compiled = new CompiledShader(program, constants, slots);
-        var lightCompiled = lightProgram != null ? new CompiledShader(lightProgram, lightConstants, slots, lit: true) : null;
+        CompiledShader compiled = new CompiledShader(program, constants, slots);
+        CompiledShader lightCompiled = lightProgram != null ? new CompiledShader(lightProgram, lightConstants, slots, lit: true) : null;
         Parallel.For(0, height, ParallelLimits.Options, y =>
         {
-            var machine = new Machine(compiled, constants);
+            Machine machine = new Machine(compiled, constants);
             for (int x = 0; x < width; x++)
             {
-                var uv = new Vector2((x + 0.5f) / width, (y + 0.5f) / height);
+                Vector2 uv = new Vector2((x + 0.5f) / width, (y + 0.5f) / height);
                 bool discarded = !machine.Run(uv, out Vector4 emit, out Vector4 lit, out Vector4 viewNormal);
                 Vector3 diffuse = lit.AsVector3() - emit.AsVector3();
                 int i = y * width + x;
@@ -236,18 +236,18 @@ public static class ShaderBaker
             specularWidth /= 2;
             specularHeight /= 2;
         }
-        var specularColor = lightCompiled != null ? new Vector3[specularWidth * specularHeight] : null;
-        var specularPower = lightCompiled != null ? new float[specularWidth * specularHeight] : null;
+        Vector3[] specularColor = lightCompiled != null ? new Vector3[specularWidth * specularHeight] : null;
+        float[] specularPower = lightCompiled != null ? new float[specularWidth * specularHeight] : null;
         if (lightCompiled != null)
         {
             Parallel.For(0, specularHeight, ParallelLimits.Options, y =>
             {
-                var lightMachine = new Machine(lightCompiled, lightConstants);
+                Machine lightMachine = new Machine(lightCompiled, lightConstants);
                 int step = width / specularWidth;
                 for (int x = 0; x < specularWidth; x++)
                 {
                     int fx = x * step + step / 2, fy = y * step + step / 2;
-                    var uv = new Vector2((fx + 0.5f) / width, (fy + 0.5f) / height);
+                    Vector2 uv = new Vector2((fx + 0.5f) / width, (fy + 0.5f) / height);
                     int i = y * specularWidth + x;
                     int full = fy * width + fx;
                     specularPower[i] = 1f;
@@ -284,7 +284,7 @@ public static class ShaderBaker
             else
             {
                 specularScale = MathF.Max(1f, peak);
-                var specular = new Rgba32[specularWidth * specularHeight];
+                Rgba32[] specular = new Rgba32[specularWidth * specularHeight];
                 for (int i = 0; i < specular.Length; i++)
                 {
                     Vector3 c = specularColor[i] / specularScale;
@@ -305,7 +305,7 @@ public static class ShaderBaker
             () => albedoImage = DdsTextures.Encode(albedo, width, height, normalMap: false),
             () => normalImage = hasNormal ? DdsTextures.Encode(normal, width, height, normalMap: true) : (MemoryImage?)null,
             () => emissiveImage = hasEmissive ? DdsTextures.Encode(emissive, width, height, normalMap: false) : (MemoryImage?)null);
-        var result = new Result(albedoImage, normalImage, emissiveImage, specularImage, specularScale, cutout, note);
+        Result result = new Result(albedoImage, normalImage, emissiveImage, specularImage, specularScale, cutout, note);
         Remember(key, result);
         return result;
     }
@@ -350,7 +350,7 @@ public static class ShaderBaker
             _bakedBytes += bytes;
             while (_bakedBytes > BakedBudget && BakedOrder.Count > 1)
             {
-                var (oldest, size) = BakedOrder.Dequeue();
+                (string oldest, long size) = BakedOrder.Dequeue();
                 Baked.Remove(oldest);
                 _bakedBytes -= size;
             }
@@ -366,7 +366,7 @@ public static class ShaderBaker
         {
             if (current.ClassName == "Material")
                 return current;
-            var props = current.GetProperties();
+            PropertyCollection props = current.GetProperties();
             int next = current.ClassName == "RvrEffectsMaterialUser"
                 ? props.GetProp<ObjectProperty>("m_pBaseMaterial")?.Value ?? 0
                 : props.GetProp<ObjectProperty>("Parent")?.Value ?? 0;
@@ -397,7 +397,7 @@ public static class ShaderBaker
     // material's package, and the game's RefShaderCache.
     private static IEnumerable<ShaderCache> Caches(IMEPackage pcc, ExportEntry baseMaterial)
     {
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (IMEPackage package in new[] { pcc, baseMaterial.FileRef })
         {
             if (package?.FilePath == null || !seen.Add(package.FilePath))
@@ -457,10 +457,10 @@ public static class ShaderBaker
         {
             lock (TrimLock)
             {
-                var loaded = Cache.Where(kv => kv.Value.IsValueCreated && kv.Value.Value != null)
+                List<(string Key, Texels Texels)> loaded = Cache.Where(kv => kv.Value.IsValueCreated && kv.Value.Value != null)
                     .Select(kv => (kv.Key, Texels: kv.Value.Value)).ToList();
                 long total = loaded.Sum(t => t.Texels.Bytes);
-                foreach (var (key, texels) in loaded.OrderBy(t => Interlocked.Read(ref t.Texels._lastUsed)))
+                foreach ((string key, Texels texels) in loaded.OrderBy(t => Interlocked.Read(ref t.Texels._lastUsed)))
                 {
                     if (total <= CacheBudget)
                         break;
@@ -476,7 +476,7 @@ public static class ShaderBaker
             if (pixels == null)
                 return null;
             // Converted in place: the decoded pixels belong to this texture alone.
-            var texels = new Texels { Width = pixels.Width, Height = pixels.Height, _data = pixels.Data };
+            Texels texels = new Texels { Width = pixels.Width, Height = pixels.Height, _data = pixels.Data };
             texels._wrapX = (pixels.Width & (pixels.Width - 1)) == 0;
             texels._wrapY = (pixels.Height & (pixels.Height - 1)) == 0;
             if (MaterialBaker.IsSrgb(texture))
@@ -631,7 +631,7 @@ public static class ShaderBaker
             List<string> texts = space < 0 ? new() : SplitOperands(line[(space + 1)..]);
             // Screen-space derivatives are zero over a flat texel grid.
             OpCode code = Codes.TryGetValue(op, out OpCode known) ? known : op.StartsWith("deriv_") ? OpCode.Deriv : OpCode.Unsupported;
-            var instruction = new Instruction { Op = op, Code = code, Saturate = saturate, Operands = new Operand[texts.Count] };
+            Instruction instruction = new Instruction { Op = op, Code = code, Saturate = saturate, Operands = new Operand[texts.Count] };
             for (int i = 0; i < texts.Count; i++)
             {
                 Match t = OperandPattern.Match(texts[i]);
@@ -662,7 +662,7 @@ public static class ShaderBaker
                 throw new NotSupportedException($"operand {text}");
             string reg = m.Groups["reg"].Value;
             string swizzle = m.Groups["swz"].Success ? m.Groups["swz"].Value : "xyzw";
-            var operand = new Operand
+            Operand operand = new Operand
             {
                 Negate = m.Groups["neg"].Success,
                 Absolute = m.Groups["abs"].Success,
@@ -707,8 +707,8 @@ public static class ShaderBaker
         public float[] Constants(Func<int, double[]> vector, Func<int, double[]> scalar)
         {
             int size = _fields.Count == 0 ? 0 : _fields.Max(f => f.Offset + f.Size);
-            var cb = new float[(size + 15) / 16 * 4 + 4];
-            foreach (var (name, offset, fieldSize) in _fields)
+            float[] cb = new float[(size + 15) / 16 * 4 + 4];
+            foreach ((string name, int offset, int fieldSize) in _fields)
             {
                 Match slot;
                 if ((slot = Regex.Match(name, @"^UniformPixelVector_(\d+)$")).Success)
@@ -760,7 +760,7 @@ public static class ShaderBaker
 
         private static List<string> SplitOperands(string text)
         {
-            var operands = new List<string>();
+            List<string> operands = new List<string>();
             int depth = 0, start = 0;
             for (int i = 0; i < text.Length; i++)
             {
@@ -816,7 +816,7 @@ public static class ShaderBaker
 
             Split = code.Length;
             int inputs = program.Inputs.Keys.DefaultIfEmpty(0).Max() + 1;
-            var textures = new Texels[code.Length];
+            Texels[] textures = new Texels[code.Length];
             for (int i = 0; i < code.Length; i++)
             {
                 Instruction ins = code[i];
@@ -836,8 +836,8 @@ public static class ShaderBaker
             // An identity tangent frame (tangent +X, normal +Z, binormal sign +1), a camera
             // straight down the normal, and white.
             InputValues = new Vector4[inputs];
-            var uvRegisters = new List<int>();
-            foreach (var (register, semantic) in program.Inputs)
+            List<int> uvRegisters = new List<int>();
+            foreach ((int register, string semantic) in program.Inputs)
             {
                 if (semantic == "TEXCOORD0")
                     uvRegisters.Add(register);
@@ -889,7 +889,7 @@ public static class ShaderBaker
 
         public Segment Compile(int from, int to)
         {
-            var body = new List<Expression>();
+            List<Expression> body = new List<Expression>();
             for (int i = 0; i < _r.Length; i++)
                 body.Add(Expression.Assign(_r[i], Expression.ArrayIndex(_rArray, Expression.Constant(i))));
             for (int i = 0; i < _o.Length; i++)
@@ -898,14 +898,14 @@ public static class ShaderBaker
                 body.Add(Emit(i));
             body.Add(Store());
             body.Add(Expression.Label(_return, Expression.Constant(true)));
-            var block = Expression.Block(typeof(bool), _r.Concat(_o), body);
+            BlockExpression block = Expression.Block(typeof(bool), _r.Concat(_o), body);
             return Expression.Lambda<Segment>(block, _v, _cb, _rArray, _oArray).Compile();
         }
 
         // Writes every register back to the arrays.
         private Expression Store()
         {
-            var writes = new List<Expression>();
+            List<Expression> writes = new List<Expression>();
             for (int i = 0; i < _r.Length; i++)
                 writes.Add(Expression.Assign(Expression.ArrayAccess(_rArray, Expression.Constant(i)), _r[i]));
             for (int i = 0; i < _o.Length; i++)
@@ -966,7 +966,7 @@ public static class ShaderBaker
                 {
                     // Both results come from the source as it was before either write.
                     ParameterExpression x = Expression.Variable(typeof(Vector4), "x");
-                    var steps = new List<Expression> { Expression.Assign(x, S(2)) };
+                    List<Expression> steps = new List<Expression> { Expression.Assign(x, S(2)) };
                     if (o[0].Kind != Kind.Null)
                         steps.Add(Write(o[0], Op(nameof(Ops.Sin), x), ins.Saturate));
                     if (o[1].Kind != Kind.Null)
