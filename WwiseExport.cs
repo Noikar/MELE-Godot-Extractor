@@ -490,6 +490,25 @@ public static class WwiseExport
         return data;
     }
 
+    // One WwiseStream export's media, decoded to a .wav: for sounds reached without an event's
+    // HIRC tree (LE2's conversation lines name their streams directly; CanonExport).
+    public static void ExportStream(string packagePath, ExportEntry export, string wavPath)
+    {
+        WwiseStream stream = ObjectBinary.From<WwiseStream>(export);
+        byte[] wem = stream.IsPCCStored ? stream.EmbeddedData : null;
+        if (wem == null)
+        {
+            string afc = Path.Combine(Path.GetDirectoryName(packagePath), stream.Filename + ".afc");
+            if (!File.Exists(afc))
+                throw new FileNotFoundException($"{stream.Filename}.afc is missing from the install.");
+            using FileStream file = File.OpenRead(afc);
+            file.Seek(stream.DataOffset, SeekOrigin.Begin);
+            wem = new byte[stream.DataSize];
+            file.ReadExactly(wem);
+        }
+        Decode(wem, wavPath);
+    }
+
     // ---------------------------------------------------------------
     // Decoding
     // ---------------------------------------------------------------

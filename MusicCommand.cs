@@ -158,7 +158,7 @@ public static class MusicCommand
     }
 
     // The sound event's chunk in the bank's index (the ICB half of the streaming data).
-    private static BankChunk SoundEvent(ISACTBankPair pair, string eventName) =>
+    internal static BankChunk SoundEvent(ISACTBankPair pair, string eventName) =>
         pair.ICBBank?.GetAllBankChunks().FirstOrDefault(c => c.SubChunks != null
             && c.SubChunks.OfType<TitleBankChunk>().Any(t => t.Value.Equals(eventName, StringComparison.OrdinalIgnoreCase))
             && c.SubChunks.Any(s => s is SoundEventSoundTracksFour))
@@ -180,7 +180,7 @@ public static class MusicCommand
 
     // The sample a bank's sound event plays: its sound track's buffer index (low 16 bits) is a
     // sample's resource index in the bank's own index (the ISB half of the streaming data).
-    private static string SampleTitle(ISACTBankPair pair, BankChunk soundEvent, string eventName)
+    internal static string SampleTitle(ISACTBankPair pair, BankChunk soundEvent, string eventName)
     {
         List<ISACTSoundTrack> tracks = soundEvent.SubChunks.OfType<SoundEventSoundTracksFour>().First().SoundTracks;
         if (tracks.Count == 0)

@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "note": "The games' own conversations whose lines our .banter files link to ({canon: <string id>}, the file named by the conversation's 'canon:' meta). Each id is <game>/<conversation>; the extractor writes GameData/canon/<id>.canon (every line's text) and GameData/canon/<id>/ (the owner's voice). EA's text and voice, so never shipped: each player extracts their own.",
+  "canon": [
+    {
+      "id": "me1/sta20_avina_keeper",
+      "label": "Avina, Presidium Tourism Terminal II",
+      "package": "ME1/BIOA_STA20_02A_DSG_LOC_INT.pcc",
+      "conversation": "sta20_avina_keeper_dlg"
+    },
+    {
+      "id": "me1/sta20_avina_stores",
+      "label": "Avina, Presidium Tourism Terminal III",
+      "package": "ME1/BIOA_STA20_02statue_DSG_LOC_INT.pcc",
+      "conversation": "sta20_avina_stores_dlg"
+    },
+    {
+      "id": "me1/sta20_avina_embassy",
+      "label": "Avina, Presidium Tourism Terminal I",
+      "package": "ME1/BIOA_STA20_07A_DSG_LOC_INT.pcc",
+      "conversation": "sta20_avina_embassy_dlg"
+    },
+    {
+      "id": "me1/sta20_avina_triggers",
+      "label": "Avina's greetings",
+      "package": "ME1/BIOA_STA20_07A_DSG_LOC_INT.pcc",
+      "conversation": "sta20_avina_triggers_dlg"
+    },
+    {
+      "id": "me2/cithub_avina_middle_d",
+      "label": "Avina's Citadel advisories",
+      "package": "ME2/BioD_CitHub_200MainRoom_LOC_INT.pcc",
+      "conversation": "cithub_avina_middle_d_dlg"
+    }
+  ]
+}

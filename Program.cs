@@ -156,9 +156,9 @@ public static class Program
                   Searches every package matching the glob for exports of <class> whose path
                   contains <filter>, e.g.: find <CookedPCConsole> BioH_*.pcc AnimSequence Idle
 
-              manifest <characters.json|weapons.json|levels.json|powers.json> <game root> <out folder> [--only <id>,...]
+              manifest <characters.json|weapons.json|levels.json|powers.json|canon.json> <game root> <out folder> [--only <id>,...]
                   Exports every entry of the manifest (character or weapon models, levels with their
-                  music, or powers' sounds) from that install into the folder, printing "PROGRESS <n>/<total>
+                  music, powers' sounds, or conversations' canon lines and voices) from that install into the folder, printing "PROGRESS <n>/<total>
                   <name>" before each and "OK <id>" after each success (the game's first-run
                   extractor reads these lines). --only exports just those entries.
 
