@@ -1,8 +1,8 @@
 # MELE-Godot-Extractor
 
 **LexExport** turns Mass Effect Legendary Edition game files into glTF (`.glb`) models, levels,
-textures, and music that Godot loads directly. It reads the game's packages through
-[Legendary Explorer](https://github.com/ME3Tweaks/LegendaryExplorer)'s `LegendaryExplorerCore`,
+effects, textures, music, and sounds that Godot loads directly. It reads the game's packages
+through [Legendary Explorer](https://github.com/ME3Tweaks/LegendaryExplorer)'s `LegendaryExplorerCore`,
 and it's the first-run asset extractor of the Mass Effect Zero fan project.
 
 **No game files are included.** You need your own copy of Mass Effect Legendary Edition. The
@@ -16,16 +16,23 @@ Not affiliated with or endorsed by EA, BioWare, or ME3Tweaks.
 - **Characters and weapons** (`mesh`): skinned meshes on a merged skeleton (body, head, hair),
   animation clips, and materials. Cooking strips ME1's material graphs, so each material is baked
   from its compiled pixel shader: diffuse, emissive, normal, and specular maps that match how the
-  game draws them, including tints and per-NPC overrides.
+  game draws them, including tints and per-NPC overrides. A weapon can also carry its shot,
+  clip, and impact sounds and effects (`--sounds`, `--vfx`).
 - **Levels** (`level`): the static world of a level's sublevels in one `.glb`: mesh instances,
-  lights, start markers, ME1's lightmaps, particle emitters, and player collision (hulls and
-  trimeshes under a `Collision` node).
-- **Music** (`music`): a level's area music as `.ogg` from the game's ISACT banks, with
+  lights (with UE3's lighting channels), start markers, ME1's lightmaps, particle emitters,
+  placeables' and ambient sounds, and player collision (hulls and trimeshes under a `Collision`
+  node). A level can also take named actors from another package (`--borrow`, optionally clipped
+  to a box), and lists its NPCs' looks in a looks manifest that exports each one as its own model.
+- **Music** (`music`): a level's area music as `.ogg` from ME1's ISACT banks, with
   `music.json` holding each track's loop points, fade times, and volume.
+- **Powers** (through a powers manifest): ME3's effects for a power as `vfx.glb`, with their
+  particle systems and translated shaders, and LE2/LE3's Wwise sounds as `.wav` with
+  `sounds.json`, decoded by [vgmstream](https://github.com/vgmstream/vgmstream).
 - **Manifests** (`manifest`): batch exports from a JSON list. This is what a game runs on first
   launch, with machine-readable progress lines.
-- **Inspection tools** for working out a new level or asset: `exports`, `props`, `texture`,
-  `shaders`, `particles`, `refs`, `2da`, `isb`, `streambank`, `reflect`, `find`.
+- **Inspection tools** for working out a new level or asset: `list`, `exports`, `props`,
+  `texture`, `shaders`, `particles`, `vfx`, `refs`, `2da`, `conversation`, `script`, `isb`,
+  `streambank`, `wwise`, `decals`, `reflect`, `find`.
 
 Run the tool with no arguments for the full command reference. Package paths can be written
 `ME1/<file>.pcc` (or `ME2`, `ME3`), relative to the game root.
@@ -34,7 +41,8 @@ Run the tool with no arguments for the full command reference. Package paths can
 
 You need:
 
-- Windows, and the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
+- Windows, the [.NET 10 SDK](https://dotnet.microsoft.com/download/dotnet/10.0), and
+  [PowerShell 7](https://github.com/PowerShell/PowerShell) (`pwsh`)
 - Mass Effect Legendary Edition (Steam or EA app)
 - A [Legendary Explorer](https://github.com/ME3Tweaks/LegendaryExplorer/releases) release,
   extracted to a folder. The tool is built and tested against **6.5.0.6522** (its DLLs report file version 6.5.0.0).
@@ -50,6 +58,11 @@ LEX's DLLs from there, from next to its own executable (a published build), or f
 (the folder holding `Game\ME1`), or else take the first install `locate` finds; `locate` prints
 the installs it finds through Steam and the EA app.
 
+The first build needs an internet connection: `vgmstream.ps1` downloads a pinned
+[vgmstream](https://github.com/vgmstream/vgmstream) release (checked by its SHA-256 and cached
+in `obj/vgmstream/`) and puts `vgmstream-cli` in `vgmstream/` beside the build. The tool runs it
+as a separate program to decode LE2 and LE3's Wwise audio.
+
 ### Publishing a self-contained build
 
 ```
@@ -57,20 +70,25 @@ dotnet publish -c Release -r win-x64 --self-contained true -p:LexDir="..." -o <o
 ```
 
 This produces a folder players can run without .NET or Legendary Explorer installed. It holds
-LEX's runtime DLLs, the GPL license, this tool's source, `THIRD-PARTY-NOTICES.txt`, and a zip of
-the Legendary Explorer source matching the shipped DLLs. `lex_source.ps1` fetches that zip from
-the release tag named by `LegendaryExplorerCore.dll`'s file version (it needs `git` and
-PowerShell 7), and it fails the publish if LEX has no such tag.
+LEX's runtime DLLs, vgmstream, the GPL license, this tool's source, `THIRD-PARTY-NOTICES.txt`,
+and a zip of the Legendary Explorer source matching the shipped DLLs. `lex_source.ps1` fetches
+that zip from the release tag named by `LegendaryExplorerCore.dll`'s file version (it needs
+`git`), and it fails the publish if LEX has no such tag.
 
 ## Manifests
 
 A manifest is a list of entries for `manifest` to export. `characters.json`, `weapons.json`,
-and `levels.json` are Mass Effect Zero's own, kept as working examples:
+`levels.json`, and `powers.json` are Mass Effect Zero's own, kept as working examples:
 
 - **Character and weapon entries** name a `package`, an `out` path, and the `args` passed to
   `mesh` (meshes, `--mat`, `--morph`, `--override`, `--anim <AnimSequence>=<Clip>[@other.pcc]`, ...).
 - **Level entries** name their sublevel `packages` (wildcards allowed), the area `music`, start
-  `markers`, and which `npcs` to bake.
+  `markers`, Rapid Transit stages (`transit`), which `npcs` to bake, the persistent level holding
+  their `music_volumes` and `stream_volumes`, the playable area's `collision_bounds`, and any
+  actors to `borrow` from other packages. A level writes `<id>.looks.json` beside its `.glb`, a
+  manifest of its NPCs' looks; run it through `manifest` to export each look as a model.
+- **Power entries** name a `package`, the power class whose effects to export (`vfx`), and the
+  Wwise events to export as its `sounds`.
 
 ```
 LexExport manifest characters.json "<game root>" "<out folder>" [--only <id>,...] [--lanes <n>] [--background]
@@ -108,6 +126,25 @@ if document.append_from_file(path, state) == OK:
 
 The loaders need a Godot version with `Image.load_dds_from_buffer` (4.4 and later). They're
 tested on 4.8.
+
+## Roadmap
+
+Planned work on the extractor:
+
+- **Characters:** `mesh --mat` taking materials from other packages (`@package`, for more armor
+  colors), and translucent glass (quarian helmet visors draw opaque today).
+- **Levels:**
+  - Static props (furniture, crates, stalls) as their own entries with per-prop collision,
+    instead of one trimesh per sublevel.
+  - NPC looks borrowed from other levels, so crowds aren't clones, and idle clips for skeletons
+    a level has none of.
+  - Lit translucent materials exported as translucent, the cubemap reflections of props whose
+    master material lives in `BIOC_Materials`, shaders that read the scene color, and
+    spotlights' real radii.
+- **Audio:** every track of a multi-track music event (only the first today), reverb volumes
+  (`ReverbVolume`, `BioAudioVolume`), and ISACT sound entities' timelines, so a level's ambient
+  sounds can be sequenced as ME1 plays them.
+- **Codex:** ME1's codex entries from `BioCodexMap`.
 
 ## License
 
