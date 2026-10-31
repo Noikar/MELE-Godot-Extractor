@@ -216,6 +216,8 @@ public partial class LevelBuilder
                     for (int t = 0; t < element.NumTriangles; t++)
                     {
                         long i = element.FirstIndex + t * 3L;
+                        if (!g.Draws(i))
+                            continue;
                         var a = instance.Vertices[indices[i]];
                         var b = instance.Vertices[indices[i + 1]];
                         var c = instance.Vertices[indices[i + 2]];

@@ -205,17 +205,20 @@ public static class ManifestCommand
             args.AddRange(["--merge-cell", mergeCell.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)]);
         // The playable area, { "min": [x, y, z], "max": [x, y, z] } in glTF space: collision
         // entirely outside it is dropped (LevelBuilder.CollisionBounds).
+        static string Corner(JsonElement box, string key) => string.Join(",", box.GetProperty(key).EnumerateArray()
+            .Select(v => v.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)));
         if (entry.TryGetProperty("collision_bounds", out JsonElement bounds))
-        {
-            string Corner(string key) => string.Join(",", bounds.GetProperty(key).EnumerateArray()
-                .Select(v => v.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)));
-            args.AddRange(["--collision-bounds", Corner("min"), Corner("max")]);
-        }
-        // Actors borrowed from other packages: [{ "package": ..., "actors": "<comma-separated names>" }].
+            args.AddRange(["--collision-bounds", Corner(bounds, "min"), Corner(bounds, "max")]);
+        // Actors borrowed from other packages: [{ "package": ..., "actors": "<comma-separated names>" }],
+        // each optionally cut to a box ("clip": { "min": [x, y, z], "max": [x, y, z] } in glTF space).
         if (entry.TryGetProperty("borrow", out JsonElement borrow))
         {
             foreach (JsonElement source in borrow.EnumerateArray())
+            {
                 args.AddRange(["--borrow", source.GetProperty("package").GetString(), source.GetProperty("actors").GetString()]);
+                if (source.TryGetProperty("clip", out JsonElement clip))
+                    args.AddRange(["--borrow-clip", Corner(clip, "min"), Corner(clip, "max")]);
+            }
         }
         var steps = new EntrySteps();
         if (LevelCommand.Run(Path.Combine(outDir, id + ".glb"), args.ToArray(), steps, laterSteps: musicIds.Length > 0 ? 1 : 0) != 0)

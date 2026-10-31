@@ -76,7 +76,9 @@ public static class LevelCommand
     // collision entirely outside it is dropped, see LevelBuilder.CollisionBounds), and
     // "--borrow <package> <actor patterns>" (only the comma-separated actors of another package,
     // wildcards allowed: ME1 keeps an elevator car in the package of the area it serves, so the
-    // Presidium borrows the Citadel Tower's car from BIOA_STA70_01_PLC; repeatable).
+    // Presidium borrows the Citadel Tower's car from BIOA_STA70_01_PLC; repeatable), each
+    // optionally followed by "--borrow-clip <min x,y,z> <max x,y,z>" (glTF space: its meshes
+    // keep only the triangles and collision touching that box, e.g. the bottom of a shaft).
     // steps reports each package read, the build, and the save (and laterSteps more the caller
     // runs after it, such as the music) for the game's progress bar.
     public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
@@ -87,7 +89,7 @@ public static class LevelCommand
         var transitSources = new List<(string Package, string Tags)>();
         var musicSources = new List<(string Package, string[] Ids)>();
         var streamSources = new List<string>();
-        var borrowSources = new List<(string Package, string[] Actors)>();
+        var borrowSources = new List<(string Package, string[] Actors, (Vector3, Vector3)? Clip)>();
         string npcs = null;
         int maxTexture = 1024;
         float mergeCell = LevelBuilder.DefaultMergeCell;
@@ -114,7 +116,9 @@ public static class LevelCommand
             else if (args[i] == "--collision-bounds" && i + 2 < args.Length)
                 collisionBounds = (ParseVector(args[++i]), ParseVector(args[++i]));
             else if (args[i] == "--borrow" && i + 2 < args.Length)
-                borrowSources.Add((args[++i], args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)));
+                borrowSources.Add((args[++i], args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), null));
+            else if (args[i] == "--borrow-clip" && i + 2 < args.Length && borrowSources.Count > 0)
+                borrowSources[^1] = borrowSources[^1] with { Clip = (ParseVector(args[++i]), ParseVector(args[++i])) };
             else
                 patterns.Add(args[i]);
         }
@@ -141,13 +145,14 @@ public static class LevelCommand
         }
         // Borrowed actors keep their own package's name, so their placeables, collision, and
         // lights' level restrictions read as they do in ME1.
-        foreach ((string package, string[] actors) in borrowSources)
+        foreach ((string package, string[] actors, (Vector3, Vector3)? clip) in borrowSources)
         {
             string file = ExpandPackages(package).First();
             steps?.Next($"Reading {Path.GetFileNameWithoutExtension(file)}");
-            Console.WriteLine($"Borrowing from {Path.GetFileNameWithoutExtension(file)}");
+            Console.WriteLine($"Borrowing from {Path.GetFileNameWithoutExtension(file)}"
+                + (clip is var (clipMin, clipMax) ? $", clipped to {clipMin} .. {clipMax}" : ""));
             using IMEPackage pcc = MEPackageHandler.OpenMEPackage(file);
-            builder.AddPackage(pcc, actors);
+            builder.AddPackage(pcc, actors, clip);
             ShaderAnalysis.Forget(pcc);
         }
         foreach ((string package, string tags) in markerSources)
@@ -226,6 +231,55 @@ public partial class LevelBuilder
         public List<Vector3[]> Hulls;            // simplified collision, when the mesh uses it
         public Vector3[] Positions;              // for per-triangle collision
         public List<(int A, int B, int C)> CollisionTriangles;
+        public bool[] Kept;                      // per triangle of Lod.IndexBuffer (index / 3), when clipped; null = all
+
+        // Whether the triangle starting at Lod.IndexBuffer[i] is drawn.
+        public bool Draws(long i) => Kept == null || Kept[i / 3];
+
+        // Whether any triangle of a section is drawn.
+        public bool DrawsSection(int s)
+        {
+            StaticMeshElement element = Lod.Elements[s];
+            for (int t = 0; t < element.NumTriangles; t++)
+            {
+                if (Draws(element.FirstIndex + t * 3L))
+                    return true;
+            }
+            return false;
+        }
+
+        // This instance's copy keeping only what touches a box in glTF space (a borrow's "clip"):
+        // the triangles drawn, the per-triangle collision, and the hulls whose bounds reach it.
+        // world: the instance's Unreal world matrix.
+        public MeshGeometry Clipped(Matrix4x4 world, Vector3 boxMin, Vector3 boxMax)
+        {
+            var copy = (MeshGeometry)MemberwiseClone();
+            Matrix4x4 toGltf = UnrealTransform.ToGltf(world);
+            Vector3[] at = GltfPositions.Select(p => Vector3.Transform(p, toGltf)).ToArray();
+            ushort[] indices = Lod.IndexBuffer;
+            copy.Kept = new bool[indices.Length / 3];
+            for (int k = 0; k < copy.Kept.Length; k++)
+                copy.Kept[k] = TriangleTouchesBox(at[indices[k * 3]], at[indices[k * 3 + 1]], at[indices[k * 3 + 2]], boxMin, boxMax);
+
+            Vector3 Collision(Vector3 p) => UnrealSpace.Position(Vector3.Transform(p, world));
+            if (Hulls != null)
+            {
+                copy.Hulls = Hulls.Where(hull =>
+                {
+                    Vector3[] points = hull.Select(Collision).ToArray();
+                    Vector3 min = points.Aggregate(Vector3.Min), max = points.Aggregate(Vector3.Max);
+                    return min.X <= boxMax.X && min.Y <= boxMax.Y && min.Z <= boxMax.Z
+                        && max.X >= boxMin.X && max.Y >= boxMin.Y && max.Z >= boxMin.Z;
+                }).ToList();
+            }
+            if (CollisionTriangles != null)
+            {
+                Vector3[] collisionAt = Positions.Select(Collision).ToArray();
+                copy.CollisionTriangles = CollisionTriangles
+                    .Where(t => TriangleTouchesBox(collisionAt[t.A], collisionAt[t.B], collisionAt[t.C], boxMin, boxMax)).ToList();
+            }
+            return copy;
+        }
     }
 
     // Reports the build and the save (LevelCommand.Run reports the packages).
@@ -277,6 +331,10 @@ public partial class LevelBuilder
     // nobody can reach, and the server holds every map of a location in one physics world,
     // where it would reach into the other maps. The scenery still draws.
     public (Vector3 Min, Vector3 Max)? CollisionBounds { get; set; }
+
+    // While a borrow with a clip is read (--borrow-clip): the box in glTF space its meshes are
+    // cut to (MeshGeometry.Clipped).
+    private (Vector3 Min, Vector3 Max)? _clip;
     private int _pageCount, _textureLit, _vertexLit, _placeables, _emitters, _markerCount, _skeletalPlaceables;
     private int _decals, _decalMeshes, _decalsUnlit, _effects;
     private readonly Dictionary<string, int> _skipped = new();
@@ -308,7 +366,21 @@ public partial class LevelBuilder
     }
 
     // only: when set, just the actors whose name matches one of these patterns (--borrow).
-    public void AddPackage(IMEPackage pcc, string[] only = null)
+    // clip: when set, their meshes keep only what touches this box in glTF space (--borrow-clip).
+    public void AddPackage(IMEPackage pcc, string[] only = null, (Vector3 Min, Vector3 Max)? clip = null)
+    {
+        _clip = clip;
+        try
+        {
+            AddPackageActors(pcc, only);
+        }
+        finally
+        {
+            _clip = null;
+        }
+    }
+
+    private void AddPackageActors(IMEPackage pcc, string[] only)
     {
         string packageName = Path.GetFileNameWithoutExtension(pcc.FilePath);
         ExportEntry levelExport = pcc.Exports.FirstOrDefault(e => e.ClassName == "Level");
@@ -958,6 +1030,14 @@ public partial class LevelBuilder
             return;
         if (!_geometry.TryGetValue(meshExport.InstancedFullPath, out MeshGeometry geometry))
             _geometry[meshExport.InstancedFullPath] = geometry = ReadGeometry(pcc, meshExport, textures);
+        // A borrow's clip keeps only the part of the mesh near where it's seen (the Tower's
+        // elevator shaft, 620 m tall, around the Presidium's stop).
+        if (_clip is var (clipMin, clipMax))
+        {
+            geometry = geometry.Clipped(world, clipMin, clipMax);
+            if (!geometry.Kept.Contains(true))
+                return;
+        }
 
         // BioLedgeMeshActors trace walkway edges for gameplay; their meshes have no material
         // and the game never draws them, but they still collide.
@@ -1023,6 +1103,9 @@ public partial class LevelBuilder
         string materialsKey = meshExport.InstancedFullPath + overrideKey;
         if (!_sectionMaterials.TryGetValue(materialsKey, out MaterialBuilder[] materials))
             _sectionMaterials[materialsKey] = materials = SectionMaterials(geometry, overrides, textures);
+        // A clipped instance draws none of the sections it clipped away entirely.
+        if (geometry.Kept != null)
+            materials = materials.Select((m, s) => geometry.DrawsSection(s) ? m : null).ToArray();
         string name = nodeName ?? actor.ObjectName.Instanced;
 
         LightMap lightMap = ReadLightMap(component);
@@ -1061,7 +1144,9 @@ public partial class LevelBuilder
                 own = AddMergePiece(name, geometry, materials, world, uv2, page, scaleBias, textureMap.ScaleVector1, textureMap.ScaleVector2, null, out merged);
             }
             // The sections left once the rest are merged are a mesh of their own, shared the same way.
-            string key = $"{meshExport.InstancedFullPath}|{uv2}{overrideKey}{(merged ? "|unmerged" : "")}";
+            // A clipped instance's mesh is its own.
+            string key = $"{meshExport.InstancedFullPath}|{uv2}{overrideKey}{(merged ? "|unmerged" : "")}"
+                + (geometry.Kept != null ? $"|clipped:{pcc.FilePath}:{component.UIndex}" : "");
             if (!_renders.TryGetValue(key, out render))
                 _renders[key] = render = BuildRender(geometry, own, uv2, null);
             if (page >= 0)
@@ -1525,6 +1610,8 @@ public partial class LevelBuilder
             for (int t = 0; t < element.NumTriangles; t++)
             {
                 long i = element.FirstIndex + t * 3L;
+                if (!g.Draws(i))
+                    continue;
                 var a = vertices[indices[i]];
                 var b = vertices[indices[i + 1]];
                 var c = vertices[indices[i + 2]];
