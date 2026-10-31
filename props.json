@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "props": [
+    {
+      "id": "terminal01",
+      "label": "Public terminal (ME3)",
+      "note": "ME3's free-standing Citadel kiosk from Docking Bay D24 (BioApl_Uti_Terminal01), a quest's terminal to repair. Its screen is only painted dark on the front face, so its two looks are quads over it with D24's own hologram textures: Holomod_05 in hologram blue when repaired, the red warning ring (H_Graphs3) when broken.",
+      "package": "ME3/BioA_CitHub_Dock_Det.pcc",
+      "mesh": "BioApl_Uti_Terminal01.Terminal01",
+      "out": "Terminal/terminal01.glb",
+      "screen": {
+        "corners": [
+          [0.392, 1.495, -0.078],
+          [0.392, 1.495, -0.516],
+          [0.392, 1.85, -0.516],
+          [0.392, 1.85, -0.078]
+        ],
+        "states": {
+          "repaired": {
+            "texture": "BioVFX_Env_Hologram.Textures.Holomod_05_Tex",
+            "tint": [0.35, 0.7, 1.0]
+          },
+          "broken": {
+            "texture": "BioVFX_Env_Hologram.Textures.H_Graphs3",
+            "tint": [1.0, 1.0, 1.0]
+          }
+        }
+      }
+    }
+  ]
+}

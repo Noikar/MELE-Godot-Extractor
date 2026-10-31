@@ -53,6 +53,10 @@ public class TextureCache
     // (ShaderBaker), falling back to MaterialBaker's recipes and the plain diffuse.
     public bool BakeShaders { get; init; }
 
+    // The vertex factory those bakes run the shaders of: skinned for characters, local for
+    // static props (PropExport).
+    public string BakeVertexFactory { get; init; } = ShaderBaker.SkinnedVertexFactory;
+
     // Skeletal placeables in a level: unlit materials (a door's glass) come from this cache,
     // the level's own, so they're the level's materials with their translated shaders (the
     // railings' scanline glass), not a skinned bake, which has nothing to bake for them.
@@ -212,7 +216,8 @@ public class TextureCache
         MemoryImage? shaderNormal = null;
         if (BakeShaders && material != null)
         {
-            ShaderBaker.Result shaded = ShaderBaker.Bake(_pcc, material, textures, colors, scalars, MaxTextureSize > 0 ? MaxTextureSize : 2048, out string failure);
+            ShaderBaker.Result shaded = ShaderBaker.Bake(_pcc, material, textures, colors, scalars, MaxTextureSize > 0 ? MaxTextureSize : 2048, out string failure,
+                BakeVertexFactory);
             if (shaded != null)
             {
                 image = shaded.Albedo;
@@ -1059,7 +1064,7 @@ public class TextureCache
     // A texture as embedded: ME1's own data and mips from the largest mip within
     // MaxTextureSize, or that mip encoded by us when its format has no DDS mapping. Once per
     // texture.
-    private MemoryImage? Decode(ExportEntry texture)
+    internal MemoryImage? Decode(ExportEntry texture)
     {
         if (_images.TryGetValue(texture.InstancedFullPath, out MemoryImage? cached))
             return cached;

@@ -96,6 +96,7 @@ public static class Program
                 "list" when args.Length >= 2 => ListCommand.Run(args[1], args.Length >= 3 ? args[2] : null),
                 "mesh" when args.Length >= 4 => MeshCommand.Run(args[1], args[2], args[3..]),
                 "level" when args.Length >= 3 => LevelCommand.Run(args[1], args[2..]),
+                "prop" when args.Length >= 4 => RunProp(args[1], args[2], args[3]),
                 "find" when args.Length >= 5 => FindCommand.Run(args[1], args[2], args[3], args[4]),
                 "manifest" when args.Length >= 4 => ManifestCommand.Run(args[1], args[3], args[4..]),
                 "music" when args.Length >= 3 => MusicCommand.Run(args[1], args[2..]),
@@ -125,6 +126,12 @@ public static class Program
         }
     }
 
+    private static int RunProp(string package, string outPath, string meshPath)
+    {
+        LevelBuilder.ExportProp(package, outPath: outPath, meshPath: meshPath);
+        return 0;
+    }
+
     private static int PrintUsage()
     {
         Console.WriteLine("""
@@ -152,13 +159,18 @@ public static class Program
                   --transit adds another package's Rapid Transit stages (BioStages) whose Tag
                   matches, e.g. --transit ME1/BIOA_STA00.pcc stage_callCab?
 
+              prop <package.pcc> <out.glb> <StaticMesh path>
+                  Exports one StaticMesh as a prop in its own frame (props.json): its materials
+                  baked from their compiled shaders, emissive on its own texture, and its
+                  simplified collision as hulls under PropAsset/Collision.
+
               find <folder> <file glob> <class> <filter>
                   Searches every package matching the glob for exports of <class> whose path
                   contains <filter>, e.g.: find <CookedPCConsole> BioH_*.pcc AnimSequence Idle
 
-              manifest <characters.json|weapons.json|levels.json|powers.json|canon.json> <game root> <out folder> [--only <id>,...]
+              manifest <characters.json|weapons.json|levels.json|powers.json|canon.json|props.json> <game root> <out folder> [--only <id>,...]
                   Exports every entry of the manifest (character or weapon models, levels with their
-                  music, powers' sounds, or conversations' canon lines and voices) from that install into the folder, printing "PROGRESS <n>/<total>
+                  music, powers' sounds, conversations' canon lines and voices, or props) from that install into the folder, printing "PROGRESS <n>/<total>
                   <name>" before each and "OK <id>" after each success (the game's first-run
                   extractor reads these lines). --only exports just those entries.
 

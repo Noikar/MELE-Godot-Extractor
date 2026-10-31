@@ -6,8 +6,8 @@ using System.Text.Json.Nodes;
 namespace LexExport;
 
 // Exports every entry of a manifest: characters.json (character models), weapons.json (weapon
-// models), levels.json (levels and their music), powers.json (powers' sounds and effects), or
-// canon.json (the games' own conversation lines, text and voice).
+// models), levels.json (levels and their music), powers.json (powers' sounds and effects),
+// canon.json (the games' own conversation lines, text and voice), or props.json (static props).
 // Each is the one list behind both the developer scripts (Tools/export_characters.ps1,
 // Tools/export_levels.ps1) and the game's first-run extractor (players), so a new model or
 // level goes into its manifest and nowhere else.
@@ -20,6 +20,7 @@ namespace LexExport;
 //   powers      -> <out>/<id>/sounds.json, .wav    (WwiseExport, each of the entry's sounds)
 //                  <out>/<id>/vfx.glb               (PowerVfx, the entry's "vfx")
 //   canon       -> <out>/<id>.canon, <out>/<id>/    (CanonExport: a conversation's lines and voices)
+//   props       -> <out>/<entry.out>               (LevelBuilder.ExportProp, the entry's mesh)
 //   <level>.looks.json -> <out>/<id>.glb            (LevelBuilder.ExportLook, one NPC look;
 //                                                   one already there is skipped, since its
 //                                                   id is a hash of everything it's made of)
@@ -54,7 +55,9 @@ public static class ManifestCommand
         bool looks = root.TryGetProperty("looks", out JsonElement lookList);
         bool powers = root.TryGetProperty("powers", out JsonElement powerList);
         bool canon = root.TryGetProperty("canon", out JsonElement canonList);
-        JsonElement list = levels ? levelList : weapons ? weaponList : looks ? lookList : powers ? powerList : canon ? canonList : root.GetProperty("characters");
+        bool props = root.TryGetProperty("props", out JsonElement propList);
+        JsonElement list = levels ? levelList : weapons ? weaponList : looks ? lookList : powers ? powerList : canon ? canonList
+            : props ? propList : root.GetProperty("characters");
         JsonElement[] entries = list.EnumerateArray()
             .Where(e => only == null || only.Contains(e.GetProperty("id").GetString()))
             .ToArray();
@@ -73,7 +76,7 @@ public static class ManifestCommand
             string id = entry.GetProperty("id").GetString();
             // "<species>: <label>" for characters ("turian: Presidium visitor"), the label otherwise.
             string label = entry.GetProperty("label").GetString();
-            string name = levels || weapons || looks || powers || canon ? label : $"{entry.GetProperty("species").GetString()}: {label}";
+            string name = levels || weapons || looks || powers || canon || props ? label : $"{entry.GetProperty("species").GetString()}: {label}";
             log.Direct($"PROGRESS {Interlocked.Increment(ref started)}/{entries.Length} {name}\n");
 
             string result;
@@ -90,6 +93,10 @@ public static class ManifestCommand
                         ExportPower(entry, id, outDir);
                     else if (canon)
                         CanonExport.Export(entry, id, outDir);
+                    else if (props)
+                        LevelBuilder.ExportProp(entry.GetProperty("package").GetString(), entry.GetProperty("mesh").GetString(),
+                            Path.Combine(outDir, entry.GetProperty("out").GetString()),
+                            entry.TryGetProperty("screen", out JsonElement screen) ? screen : default);
                     else
                         ExportModel(entry, outDir);
                     result = $"OK {id}";

@@ -23,6 +23,9 @@ Not affiliated with or endorsed by EA, BioWare, or ME3Tweaks.
   placeables' and ambient sounds, and player collision (hulls and trimeshes under a `Collision`
   node). A level can also take named actors from another package (`--borrow`, optionally clipped
   to a box), and lists its NPCs' looks in a looks manifest that exports each one as its own model.
+- **Props** (`prop`): one static mesh in its own frame, its materials baked from their compiled
+  shaders like a character's (the emissive glow on its own texture, so a game can switch it), with
+  its simplified collision; through a props manifest, optionally a hologram screen per state.
 - **Music** (`music`): a level's area music as `.ogg` from ME1's ISACT banks, with
   `music.json` holding each track's loop points, fade times, and volume.
 - **Powers** (through a powers manifest): ME3's effects for a power as `vfx.glb`, with their
@@ -78,7 +81,7 @@ that zip from the release tag named by `LegendaryExplorerCore.dll`'s file versio
 ## Manifests
 
 A manifest is a list of entries for `manifest` to export. `characters.json`, `weapons.json`,
-`levels.json`, and `powers.json` are Mass Effect Zero's own, kept as working examples:
+`levels.json`, `powers.json`, and `props.json` are Mass Effect Zero's own, kept as working examples:
 
 - **Character and weapon entries** name a `package`, an `out` path, and the `args` passed to
   `mesh` (meshes, `--mat`, `--morph`, `--override`, `--anim <AnimSequence>=<Clip>[@other.pcc]`, ...).
@@ -89,6 +92,10 @@ A manifest is a list of entries for `manifest` to export. `characters.json`, `we
   manifest of its NPCs' looks; run it through `manifest` to export each look as a model.
 - **Power entries** name a `package`, the power class whose effects to export (`vfx`), and the
   Wwise events to export as its `sounds`.
+- **Prop entries** name a `package`, a StaticMesh (`mesh`), and an `out` path. The mesh is written
+  in its own frame with its materials baked from their compiled shaders (emissive on its own
+  texture) and its simplified collision. An optional `screen` lays a quad over the prop's screen
+  per state (`corners`, and per state a hologram `texture` from the same package and a `tint`).
 
 ```
 LexExport manifest characters.json "<game root>" "<out folder>" [--only <id>,...] [--lanes <n>] [--background]

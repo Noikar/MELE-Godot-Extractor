@@ -35,8 +35,9 @@ public static class ShaderBaker
     public record Result(MemoryImage Albedo, MemoryImage? Normal, MemoryImage? Emissive, MemoryImage? Specular,
         float SpecularScale, bool Cutout, string Note);
 
-    // The no-lightmap base pass for skinned meshes; any no-lightmap variant will do.
-    private const string VertexFactory = "FGPUSkinVertexFactory";
+    // The vertex factory a mesh draws with: skinned for characters (the default), local for
+    // static meshes (props). Its no-lightmap base pass is baked; any no-lightmap variant will do.
+    public const string SkinnedVertexFactory = "FGPUSkinVertexFactory";
     private const string ShaderType = "TBasePassPixelShaderFNoLightMapPolicyNoSkyLight";
     // The dominant light's base pass, which holds the material's specular.
     private const string LightShaderType = "TBasePassPixelShaderFDirectionalLightLightMapPolicyNoSkyLight";
@@ -49,7 +50,8 @@ public static class ShaderBaker
     private const int MaxSpecularSize = 1024;
 
     public static Result Bake(IMEPackage pcc, ExportEntry material, Dictionary<string, ExportEntry> textures,
-        Dictionary<string, Vector3> colors, Dictionary<string, float> scalars, int maxSize, out string failure)
+        Dictionary<string, Vector3> colors, Dictionary<string, float> scalars, int maxSize, out string failure,
+        string vertexFactory = SkinnedVertexFactory)
     {
         failure = null;
         ExportEntry baseMaterial = BaseMaterial(pcc, material);
@@ -61,10 +63,22 @@ public static class ShaderBaker
         Guid id = ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.ID;
         MaterialShaderMap map = null;
         ShaderCache cache = null;
-        foreach (ShaderCache candidate in Caches(pcc, baseMaterial))
+        // The default textures by slot, as entries of defaultsPackage: an instance with static
+        // switches keeps its own list for its own permutation (ShaderAnalysis.ShaderMapOf).
+        int[] defaults = null;
+        IMEPackage defaultsPackage = null;
+        foreach (ShaderCache candidate in Caches(pcc, baseMaterial, vertexFactory))
         {
-            map = candidate.MaterialShaderMaps.Values.FirstOrDefault(m => m.StaticParameters.BaseMaterialId == id
-                && m.MeshShaderMaps.Any(s => s.VertexFactoryType.Instanced == VertexFactory));
+            // The instance's own static permutation when the cache has it (a placeable's
+            // Emissive switch), else any map of the base material drawn with this vertex factory.
+            map = ShaderAnalysis.ShaderMapOf(candidate, material, baseMaterial, out defaults, out defaultsPackage, out _);
+            if (map == null || !map.MeshShaderMaps.Any(s => s.VertexFactoryType.Instanced == vertexFactory))
+            {
+                map = candidate.MaterialShaderMaps.Values.FirstOrDefault(m => m.StaticParameters.BaseMaterialId == id
+                    && m.MeshShaderMaps.Any(s => s.VertexFactoryType.Instanced == vertexFactory));
+                defaults = ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
+                defaultsPackage = baseMaterial.FileRef;
+            }
             if (map != null)
             {
                 cache = candidate;
@@ -73,10 +87,10 @@ public static class ShaderBaker
         }
         if (map == null)
         {
-            failure = $"no skinned shader for {baseMaterial.ObjectName.Instanced}";
+            failure = $"no {vertexFactory} shader for {baseMaterial.ObjectName.Instanced}";
             return null;
         }
-        List<KeyValuePair<NameReference, ShaderReference>> shaders = map.MeshShaderMaps.Where(s => s.VertexFactoryType.Instanced == VertexFactory).SelectMany(s => s.Shaders.Select(kv => kv)).ToList();  // through Select: LEX's UMap.CopyTo is broken
+        List<KeyValuePair<NameReference, ShaderReference>> shaders = map.MeshShaderMaps.Where(s => s.VertexFactoryType.Instanced == vertexFactory).SelectMany(s => s.Shaders.Select(kv => kv)).ToList();  // through Select: LEX's UMap.CopyTo is broken
         ShaderReference reference = shaders.FirstOrDefault(s => s.Key.Instanced == ShaderType).Value
             ?? shaders.FirstOrDefault(s => s.Key.Instanced.StartsWith("TBasePassPixelShaderFNoLightMapPolicy")).Value;
         if (reference == null || !cache.Shaders.TryGetValue(reference.Id, out Shader shader))
@@ -123,7 +137,6 @@ public static class ShaderBaker
         }
 
         // Textures by shader slot: an instance parameter, else the base material's default.
-        int[] defaults = ObjectBinary.From<Material>(baseMaterial).SM3MaterialResource.UniformExpressionTextures;
         Dictionary<int, ExportEntry> slotTextures = new Dictionary<int, ExportEntry>();
         // The specular shader may sample maps the base pass doesn't (a specular power map).
         foreach (int slot in program.TextureSlots.Union(lightProgram?.TextureSlots ?? []))
@@ -133,7 +146,7 @@ public static class ShaderBaker
             if (expression is MaterialUniformExpressionTextureParameter parameter)
                 textures.TryGetValue(parameter.ParameterName.Instanced, out texture);
             if (texture == null && expression != null && expression.TextureIndex < defaults.Length)
-                texture = Resolve(baseMaterial.FileRef, defaults[expression.TextureIndex]);
+                texture = Resolve(defaultsPackage, defaults[expression.TextureIndex]);
             slotTextures[slot] = texture?.ClassName == "Texture2D" ? texture : null;
         }
 
@@ -390,12 +403,14 @@ public static class ShaderBaker
             if (EntryScope.OpenShared(Path.Combine(folder, file))?.FindExport(import.InstancedFullPath) is ExportEntry found)
                 return found;
         }
-        return null;
+        // The packages the game always has loaded (ME3's placeable master, BIOG_APL_MASTER_MATERIAL,
+        // is in SFXGame).
+        return TextureCache.Resolve(pcc, uIndex);
     }
 
     // Where a material's compiled shaders may live: the character's package, the base
     // material's package, and the game's RefShaderCache.
-    private static IEnumerable<ShaderCache> Caches(IMEPackage pcc, ExportEntry baseMaterial)
+    private static IEnumerable<ShaderCache> Caches(IMEPackage pcc, ExportEntry baseMaterial, string vertexFactory)
     {
         HashSet<string> seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (IMEPackage package in new[] { pcc, baseMaterial.FileRef })
@@ -406,7 +421,7 @@ public static class ShaderBaker
                 yield return cache;
         }
         string refCache = Path.Combine(Path.GetDirectoryName(pcc.FilePath)!, ShaderAnalysis.RefShaderCache);
-        if (ShaderAnalysis.CacheOfFile(refCache, VertexFactory) is ShaderCache shared)
+        if (ShaderAnalysis.CacheOfFile(refCache, vertexFactory) is ShaderCache shared)
             yield return shared;
     }
 
