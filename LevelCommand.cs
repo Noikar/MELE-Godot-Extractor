@@ -76,7 +76,8 @@ public static class LevelCommand
     // collision entirely outside it is dropped, see LevelBuilder.CollisionBounds), and
     // "--borrow <package> <actor patterns>" (only the comma-separated actors of another package,
     // wildcards allowed: ME1 keeps an elevator car in the package of the area it serves, so the
-    // Presidium borrows the Citadel Tower's car from BIOA_STA70_01_PLC; repeatable), each
+    // Presidium borrows the Citadel Tower's car from BIOA_STA70_01_PLC; "<actor>.<component>"
+    // takes one component of a collection actor, such as one light; repeatable), each
     // optionally followed by "--borrow-clip <min x,y,z> <max x,y,z>" (glTF space: its meshes
     // keep only the triangles and collision touching that box, e.g. the bottom of a shaft).
     // steps reports each package read, the build, and the save (and laterSteps more the caller
@@ -335,6 +336,10 @@ public partial class LevelBuilder
     // While a borrow with a clip is read (--borrow-clip): the box in glTF space its meshes are
     // cut to (MeshGeometry.Clipped).
     private (Vector3 Min, Vector3 Max)? _clip;
+    // While a borrowed collection actor is read: the component patterns it keeps, from borrow
+    // patterns "<actor>.<component>" (one sky light of the Tower's StaticLightCollectionActor);
+    // null keeps them all.
+    private string[] _onlyComponents;
     private int _pageCount, _textureLit, _vertexLit, _placeables, _emitters, _markerCount, _skeletalPlaceables;
     private int _decals, _decalMeshes, _decalsUnlit, _effects;
     private readonly Dictionary<string, int> _skipped = new();
@@ -419,11 +424,15 @@ public partial class LevelBuilder
             if (only != null)
             {
                 string actorName = actor.ObjectName.Instanced;
-                string[] hits = only.Where(p => FileSystemName.MatchesSimpleExpression(p, actorName, ignoreCase: true)).ToArray();
+                string[] hits = only.Where(p => FileSystemName.MatchesSimpleExpression(BorrowActor(p), actorName, ignoreCase: true)).ToArray();
                 if (hits.Length == 0)
                     continue;
                 matched.UnionWith(hits);
                 borrowed.Add(actorName);
+                // A plain actor pattern keeps all of it, even when another names one component.
+                _onlyComponents = hits.Any(p => !p.Contains('.'))
+                    ? null
+                    : hits.Select(p => p[(p.IndexOf('.') + 1)..]).ToArray();
             }
             try
             {
@@ -437,6 +446,10 @@ public partial class LevelBuilder
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"  {actor.ObjectName.Instanced} ({actor.ClassName}) failed: {(Environment.GetEnvironmentVariable("LEXEXPORT_TRACE") == "1" ? ex.ToString() : ex.Message)}");
+            }
+            finally
+            {
+                _onlyComponents = null;
             }
         }
         foreach ((ExportEntry actor, ExportEntry component) in decals)
@@ -466,6 +479,17 @@ public partial class LevelBuilder
         }
     }
 
+    // The actor part of a borrow pattern ("<actor>" or "<actor>.<component>").
+    private static string BorrowActor(string pattern)
+    {
+        int dot = pattern.IndexOf('.');
+        return dot < 0 ? pattern : pattern[..dot];
+    }
+
+    // Whether a collection actor's component is read (_onlyComponents).
+    private bool KeepsComponent(ExportEntry component) => _onlyComponents == null
+        || _onlyComponents.Any(p => FileSystemName.MatchesSimpleExpression(p, component.ObjectName.Instanced, ignoreCase: true));
+
     private void AddActor(IMEPackage pcc, ExportEntry actor, NodeBuilder packageNode, TextureCache textures,
         PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> trimesh)
     {
@@ -477,7 +501,7 @@ public partial class LevelBuilder
             var collection = ObjectBinary.From<StaticMeshCollectionActor>(actor);
             for (int i = 0; i < collection.Components.Count; i++)
             {
-                if (pcc.TryGetUExport(collection.Components[i], out ExportEntry component))
+                if (pcc.TryGetUExport(collection.Components[i], out ExportEntry component) && KeepsComponent(component))
                     AddMeshInstance(pcc, actor, null, component, collection.LocalToWorldTransforms[i], packageNode, textures, trimesh);
             }
             return;
@@ -487,7 +511,7 @@ public partial class LevelBuilder
             var collection = ObjectBinary.From<StaticLightCollectionActor>(actor);
             for (int i = 0; i < collection.Components.Count; i++)
             {
-                if (pcc.TryGetUExport(collection.Components[i], out ExportEntry component))
+                if (pcc.TryGetUExport(collection.Components[i], out ExportEntry component) && KeepsComponent(component))
                     AddLight(component, collection.LocalToWorldTransforms[i], actor);
             }
             return;
@@ -1841,6 +1865,25 @@ public partial class LevelBuilder
         return true;
     }
 
+    // The levels a light may reach, or null for every level. A light can be limited to its own
+    // level and the ones it names, e.g. the Wards' sky directional (in _00_ART) only reaches the
+    // open areas 01, 02, 08, 09, and 10. ME1 names areas, not packages (there's no
+    // BIOA_STA60_01.pcc), so the game matches these as package-name prefixes. Lightmaps already
+    // honor this; the game's light environments need it.
+    private static JsonArray LightLevels(ExportEntry component, PropertyCollection props)
+    {
+        if (props.GetProp<BoolProperty>("bOnlyAffectSameAndSpecifiedLevels")?.Value != true)
+            return null;
+        var levels = new JsonArray(Path.GetFileNameWithoutExtension(component.FileRef.FilePath));
+        foreach (NameProperty level in props.GetProp<ArrayProperty<NameProperty>>("OtherLevelsToAffect") ?? Enumerable.Empty<NameProperty>())
+        {
+            string name = level.Value.Instanced;
+            if (!string.IsNullOrEmpty(name) && name != "None")
+                levels.Add(name);
+        }
+        return levels;
+    }
+
     // Unreal light components become KHR_lights_punctual lights. Intensities are only a
     // starting point; the raw Unreal values ride along in the node's extras for the loader.
     private void AddLight(ExportEntry component, Matrix4x4 world, ExportEntry actor)
@@ -1859,7 +1902,7 @@ public partial class LevelBuilder
         if (component.ClassName == "SkyLightComponent")
         {
             Vector3 lower = UnrealTransform.SrgbColor(props.GetProp<StructProperty>("LowerColor"));
-            _lights.AddNode(new NodeBuilder($"SkyLight_{_lightCount++}", new JsonObject
+            var skyExtras = new JsonObject
             {
                 ["ue_class"] = component.ClassName,
                 ["ue_brightness"] = brightness,
@@ -1868,7 +1911,10 @@ public partial class LevelBuilder
                 ["ue_lower_color"] = new JsonArray(lower.X, lower.Y, lower.Z),
                 ["ue_channels"] = LightChannels(component),
                 ["ue_dynamic"] = DynamicLight(component, actor),
-            }));
+            };
+            if (LightLevels(component, props) is JsonArray skyLevels)
+                skyExtras["ue_levels"] = skyLevels;
+            _lights.AddNode(new NodeBuilder($"SkyLight_{_lightCount++}", skyExtras));
             Console.WriteLine($"  sky light: brightness {brightness}, color {color}");
             return;
         }
@@ -1921,21 +1967,8 @@ public partial class LevelBuilder
             ["ue_channels"] = LightChannels(component),
             ["ue_dynamic"] = DynamicLight(component, actor),
         };
-        // A light can be limited to its own level and the ones it names, e.g. the Wards' sky
-        // directional (in _00_ART) only reaches the open areas 01, 02, 08, 09, and 10. ME1 names
-        // areas, not packages (there's no BIOA_STA60_01.pcc), so the game matches these as
-        // package-name prefixes. Lightmaps already honor this; the game's light environments need it.
-        if (props.GetProp<BoolProperty>("bOnlyAffectSameAndSpecifiedLevels")?.Value == true)
-        {
-            var levels = new JsonArray(Path.GetFileNameWithoutExtension(component.FileRef.FilePath));
-            foreach (NameProperty level in props.GetProp<ArrayProperty<NameProperty>>("OtherLevelsToAffect") ?? Enumerable.Empty<NameProperty>())
-            {
-                string name = level.Value.Instanced;
-                if (!string.IsNullOrEmpty(name) && name != "None")
-                    levels.Add(name);
-            }
+        if (LightLevels(component, props) is JsonArray levels)
             extras["ue_levels"] = levels;
-        }
         var node = new NodeBuilder($"{component.ClassName.Replace("Component", "")}_{_lightCount}", extras);
         _lights.AddNode(node);
 
