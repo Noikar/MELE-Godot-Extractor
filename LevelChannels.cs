@@ -20,7 +20,8 @@ namespace LexExport;
 // bForceDynamicLight): a light environment composites a static light whenever their channels
 // share one, Dynamic included (most of ME1's static lights are BSP, Static, and Dynamic only).
 //
-// The game gets them in the extras: lights' "ue_channels" and "ue_dynamic", and on unlightmapped instances,
+// The game gets them in the extras: lights' "ue_channels", "ue_dynamic", "ue_composite_shadow",
+// and "ue_shadow_direction", and on unlightmapped instances,
 // skeletal placeables, and pawns, "me_channels" and "me_light_environment".
 public partial class LevelBuilder
 {
@@ -48,6 +49,18 @@ public partial class LevelBuilder
     private static bool DynamicLight(ExportEntry component, ExportEntry actor) =>
         InheritedProp<BoolProperty>(component, "bForceDynamicLight")?.Value == true
         || actor.ClassName.EndsWith("Movable") || actor.ClassName.EndsWith("Toggleable");
+
+    // Whether a light darkens the one composite shadow a light environment casts (CastShadows,
+    // CastDynamicShadows, and bCastCompositeShadow, all on by default), and whether it steers that
+    // shadow's direction (bAffectCompositeShadowDirection, on by default). ME1 turns both off on
+    // most small fixtures, so only a few lamps in an area move a character's shadow.
+    private static bool CompositeShadow(ExportEntry component) =>
+        InheritedProp<BoolProperty>(component, "CastShadows")?.Value != false
+        && InheritedProp<BoolProperty>(component, "CastDynamicShadows")?.Value != false
+        && InheritedProp<BoolProperty>(component, "bCastCompositeShadow")?.Value != false;
+
+    private static bool ShadowDirection(ExportEntry component) =>
+        InheritedProp<BoolProperty>(component, "bAffectCompositeShadowDirection")?.Value != false;
 
     // A primitive's channels (PrimitiveComponent sets none by default), or the ones UE3 gives it
     // on attach when they were never set.

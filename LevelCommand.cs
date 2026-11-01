@@ -355,6 +355,8 @@ public partial class LevelBuilder
     private readonly NodeBuilder _lights;
     private readonly NodeBuilder _markers;
     private readonly NodeBuilder _collision;
+    // The package being read's trimesh for meshes that cast no shadow.
+    private PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> _shadowlessTrimesh;
     private readonly NodeBuilder _lightmapPagesNode;
     private readonly NodeBuilder _particles;
     private readonly NodeBuilder _particleAssets;
@@ -387,7 +389,7 @@ public partial class LevelBuilder
     // original lighting, for the decals projected onto them.
     private readonly Dictionary<int, (Matrix4x4 World, JsonObject Lighting)> _receivers = new();
 
-    private int _instances, _lightCount, _hullCount, _trimeshTriangles, _droppedHulls, _droppedTriangles;
+    private int _instances, _lightCount, _shadowLights, _steeringLights, _hullCount, _unlitHulls, _shadowlessTriangles, _trimeshTriangles, _droppedHulls, _droppedTriangles;
 
     // The level's playable area in glTF space (--collision-bounds; the manifest's
     // "collision_bounds"). Collision entirely outside it is dropped: ME1 gives far scenery
@@ -441,6 +443,9 @@ public partial class LevelBuilder
         try
         {
             AddPackageActors(pcc, only);
+            // The path network walkers route through (LevelPawns.cs, AddPathNetwork).
+            if (_pawnsNode != null && only == null)
+                AddPathNetwork(pcc);
         }
         finally
         {
@@ -471,7 +476,12 @@ public partial class LevelBuilder
         NodeBuilder packageNode = _root.CreateNode(packageName);
         MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty> trimesh = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Trimesh_{packageName}");
         PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> trimeshPrimitive = trimesh.UsePrimitive(_collisionMaterial);
+        // The triangles of meshes that cast no shadow go in a trimesh of their own, which light
+        // passes through (AddHull).
+        MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty> shadowless = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Trimesh_{packageName}_Shadowless");
+        _shadowlessTrimesh = shadowless.UsePrimitive(_collisionMaterial);
         int instancesBefore = _instances, lightsBefore = _lightCount, hullsBefore = _hullCount, trisBefore = _trimeshTriangles;
+        int shadowlessBefore = _shadowlessTriangles;
         _receivers.Clear();
         _movers = FindMovers(pcc);
         // Decals go last: they draw on their receivers, which may come later in the actor list.
@@ -529,8 +539,14 @@ public partial class LevelBuilder
         // After the decals, which only need the receivers' transforms and lighting.
         WriteMergedChunks(packageName);
 
-        if (_trimeshTriangles > trisBefore)
+        if (_trimeshTriangles - trisBefore > _shadowlessTriangles - shadowlessBefore)
             _scene.AddRigidMesh(trimesh, _collision.CreateNode(trimesh.Name));
+        if (_shadowlessTriangles > shadowlessBefore)
+        {
+            NodeBuilder shadowlessNode = _collision.CreateNode(shadowless.Name);
+            shadowlessNode.Extras = new JsonObject { ["blocks_light"] = false };
+            _scene.AddRigidMesh(shadowless, shadowlessNode);
+        }
 
         Console.WriteLine($"{packageName}: {_instances - instancesBefore} mesh instances, {_lightCount - lightsBefore} lights, "
             + $"{_hullCount - hullsBefore} hulls, {_trimeshTriangles - trisBefore} collision triangles.");
@@ -1141,10 +1157,14 @@ public partial class LevelBuilder
         // A mover's collision would stay at its start (LevelMovers.cs).
         if (mover != null || !BlocksPlayer(actorProps, componentProps))
             return;
+        // UE3's light traces only meet primitives that cast shadows (TRACE_ShadowCast).
+        bool castsShadow = !hidden && componentProps.GetProp<BoolProperty>("CastShadow")?.Value != false;
+        if (!castsShadow)
+            trimesh = _shadowlessTrimesh;
         if (geometry.Hulls != null)
         {
             foreach (Vector3[] hull in geometry.Hulls)
-                AddHull(hull, world);
+                AddHull(hull, world, castsShadow);
         }
         else if (geometry.CollisionTriangles != null)
         {
@@ -1165,6 +1185,8 @@ public partial class LevelBuilder
                 else
                     trimesh.AddTriangle(transformed[a], transformed[b], transformed[c]);
                 _trimeshTriangles++;
+                if (!castsShadow)
+                    _shadowlessTriangles++;
             }
         }
     }
@@ -1866,14 +1888,17 @@ public partial class LevelBuilder
             return;
         if (brushProps.GetProp<StructProperty>("BrushAggGeom") is StructProperty agg)
         {
+            // Volumes cast no shadow, so lights shine through them.
             foreach (Vector3[] hull in ReadAggGeom(agg))
-                AddHull(hull, actorToWorld);
+                AddHull(hull, actorToWorld, castsShadow: false);
         }
     }
 
     // A hull goes out as a fan of triangles over its points: the loader only reads the points
-    // (Godot builds the convex shape from them), and a fan keeps every point in the mesh.
-    private void AddHull(Vector3[] localPoints, Matrix4x4 world)
+    // (Godot builds the convex shape from them), and a fan keeps every point in the mesh. One
+    // that casts no shadow (blocking volumes, hidden meshes) carries "blocks_light": false, so
+    // characters' light traces pass through it.
+    private void AddHull(Vector3[] localPoints, Matrix4x4 world, bool castsShadow)
     {
         COLLISION_VERTEX[] points = localPoints.Select(p => new COLLISION_VERTEX(UnrealSpace.Position(Vector3.Transform(p, world)))).ToArray();
         // Outside the playable area when its bounding box is (a slanted hull whose box touches
@@ -1897,8 +1922,13 @@ public partial class LevelBuilder
         PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> primitive = hull.UsePrimitive(_collisionMaterial);
         for (int i = 1; i + 1 < points.Length; i++)
             primitive.AddTriangle(points[0], points[i], points[i + 1]);
-        _scene.AddRigidMesh(hull, _collision.CreateNode(hull.Name));
+        NodeBuilder node = _collision.CreateNode(hull.Name);
+        if (!castsShadow)
+            node.Extras = new JsonObject { ["blocks_light"] = false };
+        _scene.AddRigidMesh(hull, node);
         _hullCount++;
+        if (!castsShadow)
+            _unlitHulls++;
     }
 
     // Whether a triangle touches a box, by the separating axis test (Akenine-Möller): the box's
@@ -2033,7 +2063,15 @@ public partial class LevelBuilder
             ["ue_falloff"] = falloff,
             ["ue_channels"] = LightChannels(component),
             ["ue_dynamic"] = DynamicLight(component, actor),
+            ["ue_composite_shadow"] = CompositeShadow(component),
+            ["ue_shadow_direction"] = ShadowDirection(component),
         };
+        if (CompositeShadow(component))
+        {
+            _shadowLights++;
+            if (ShadowDirection(component))
+                _steeringLights++;
+        }
         if (LightLevels(component, props) is JsonArray levels)
             extras["ue_levels"] = levels;
         NodeBuilder node = new NodeBuilder($"{component.ClassName.Replace("Component", "")}_{_lightCount}", extras);
@@ -2051,6 +2089,8 @@ public partial class LevelBuilder
     public void Write(string outPath)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+        // Every package's path network is in: route the walkers' legs ME1 can't walk straight.
+        RouteWalkers();
         Steps?.Next("Building the level");
         AddMaterialTextures();
         Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
@@ -2064,6 +2104,7 @@ public partial class LevelBuilder
             + $"{_images.Count} textures, {_lightCount} lights, {_hullCount} hulls, {_trimeshTriangles} collision triangles "
             + $"(glTF built in {built:0.0} s, saved in {clock.Elapsed.TotalSeconds - built:0.0} s).");
         Console.WriteLine($"Textures: {dds}.");
+        Console.WriteLine($"Character shadows: {_shadowLights} of {_lightCount} lights cast them, {_steeringLights} steer them; light passes through {_unlitHulls} of {_hullCount} hulls and {_shadowlessTriangles} of {_trimeshTriangles} collision triangles (volumes, hidden or shadowless meshes).");
         if (CollisionBounds is (Vector3 areaMin, Vector3 areaMax))
             Console.WriteLine($"Collision bounds {areaMin} to {areaMax}: dropped {_droppedHulls} hulls and {_droppedTriangles} collision triangles outside.");
         Console.WriteLine($"Original lighting: {_textureLit} instances from {_pageCount} lightmap pages, {_vertexLit} from vertex lightmaps, "
@@ -2086,6 +2127,10 @@ public partial class LevelBuilder
                 Console.WriteLine("NPC clips not found: " + string.Join(", ", _missingClips));
             if (_unusableClips.Count > 0)
                 Console.WriteLine("NPC clips left out (no track fits): " + string.Join(", ", _unusableClips));
+            Console.WriteLine($"Walkers: {_walkers} ({_walkerPoints} points)"
+                + (_walkersLeftOut.Count > 0 ? "; left standing: " + string.Join(", ", _walkersLeftOut) : "") + ".");
+            foreach (string route in _walkerRoutes)
+                Console.WriteLine("  " + route);
         }
         if (_skipped.Count > 0)
             Console.WriteLine("Skipped: " + string.Join(", ", _skipped.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}")));

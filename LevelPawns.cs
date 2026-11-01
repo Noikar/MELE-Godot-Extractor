@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO.Enumeration;
 using System.Numerics;
 using System.Security.Cryptography;
@@ -11,6 +12,7 @@ using SharpGLTF.Geometry.VertexTypes;
 using SharpGLTF.Materials;
 using SharpGLTF.Memory;
 using SharpGLTF.Scenes;
+using Bio2DA = LegendaryExplorerCore.Unreal.Classes.Bio2DA;
 using BioMorphFace = LegendaryExplorerCore.Unreal.Classes.BioMorphFace;
 
 namespace LexExport;
@@ -160,6 +162,9 @@ public partial class LevelBuilder
         }
         if (twitches.Count > 0)
             pawn["twitches"] = twitches;
+        // A walker's route, its stops, and its walk.
+        if (WalkFor(pcc, actor, type, asset, species, actorToMesh) is JsonObject walk)
+            pawn["walk"] = walk;
 
         NodeBuilder node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["pawn"] = pawn });
         _pawnsNode.AddNode(node);
@@ -729,6 +734,356 @@ public partial class LevelBuilder
                 return (_sharedAnimations, shared);
         }
         return (null, null);
+    }
+
+    // ---------------------------------------------------------------
+    // WALKERS (BioSeqAct_WalkWaypointSet: the markets' "Walkers")
+    // ---------------------------------------------------------------
+    //
+    // A walker's Kismet starts a BioSeqAct_WalkWaypointSet whose [Target] holds the pawn and whose
+    // [Waypoint Set] is a BioWaypointSet: WaypointReferences to BioPathPoints, walked through, and
+    // BioWp_Kismets, where it stops and fires a BioSeqEvt_WaypointSet_WaypointReached (Originator:
+    // the point). From that event Kismet waits (Delays), then either resumes the walk
+    // (BioSeqAct_ResumeWalking) or plays an in-place action station from BIOG_ActionStations_Q (a
+    // SequenceReference) whose weighted random switch leaves it after a while. ME1's
+    // BioAiController walks straight between points at the appearance's CreatureSpeed row's
+    // WalkSpeed (Engine.pcc's creature speed table), turning at its HighTurnSpeed, and the ambient
+    // AnimTree plays EX_Walk. The game runs the schedule (LevelWalker.gd); the export is its data:
+    //
+    //   walk: { type ("out_and_back" | "loop"), speed (m/s), turn_rate (degrees/s), clip (the walk
+    //           loop), clip_speed (the speed, in m/s, at which its feet don't slide), forward (the
+    //           pawn's facing in its node's frame), points: [{ at: [x, y, z] (level space),
+    //           stop?: { pose?, wait: [min, max] (seconds) }, detour?: [[x, y, z], ...]
+    //           (PATHS, below) }] }
+
+    // The ambient AnimTree's reference speed for EX_Walk (BIOG_Ambient_O: 131.8 uu/s).
+    private const float WalkClipSpeed = 1.318f;
+    // An action station stop lasts its Kismet delays plus this long: ME1's weighted switch
+    // (a 1-3 s delay, a twitch, or leaving) usually leaves after 10-30 s in all.
+    private const float StationWaitMin = 8f;
+    private const float StationWaitMax = 28f;
+    private const string CreatureSpeedsPackage = "ME1/Engine.pcc";
+    private const string CreatureSpeedsTable = "BIOG_2DA_Movement_X.MovementTables_CreatureSpeeds";
+
+    // CreatureSpeed rows: walk speed (uu/s) and turn rate (degrees/s), read once.
+    private Dictionary<string, (float Walk, float Turn)> _creatureSpeeds;
+    private int _walkers, _walkerPoints;
+    private readonly SortedSet<string> _walkersLeftOut = new(StringComparer.OrdinalIgnoreCase);
+
+    // The pawn's walk, or null when no BioSeqAct_WalkWaypointSet walks it.
+    private JsonObject WalkFor(IMEPackage pcc, ExportEntry actor, ExportEntry type, PawnAsset asset, string species, Matrix4x4 actorToMesh)
+    {
+        Kismet kismet = KismetOf(pcc);
+        ExportEntry walk = kismet.Bindings.FirstOrDefault(b => b.Op.ClassName == "BioSeqAct_WalkWaypointSet" && b.Link == "Target"
+            && b.Objects.Contains(actor.UIndex)).Op;
+        if (walk == null)
+            return null;
+        string name = $"{Path.GetFileNameWithoutExtension(pcc.FilePath)}_{actor.ObjectName.Instanced}";
+        HashSet<int> sets = kismet.Bindings.FirstOrDefault(b => b.Op == walk && b.Link == "Waypoint Set").Objects;
+        if (sets?.FirstOrDefault() is not int setIndex || !pcc.TryGetUExport(setIndex, out ExportEntry set) || set.ClassName != "BioWaypointSet")
+        {
+            _walkersLeftOut.Add($"{name} (no waypoint set)");
+            return null;
+        }
+        // The Wards use only these two; Linear, OutAndBack (once), and Random would need their own
+        // schedules.
+        string walkType = walk.GetProperties().GetProp<EnumProperty>("m_eWalkType")?.Value.Instanced ?? "WWT_Linear";
+        string kind = walkType switch
+        {
+            "WWT_OutAndBackLooping" => "out_and_back",
+            "WWT_Looping" => "loop",
+            _ => null,
+        };
+        if (kind == null)
+        {
+            _walkersLeftOut.Add($"{name} ({walkType})");
+            return null;
+        }
+        // Krogan take the KRO_ set (FindAnimation); females their own.
+        string clip = BakeClip(asset, species is "human_female" or "asari" ? "HMF_EX_Pistol" : "HMM_EX_Pistol", "EX_Walk", species);
+        if (clip == null)
+        {
+            _walkersLeftOut.Add($"{name} (no walk clip)");
+            return null;
+        }
+
+        // Each BioWp_Kismet's WaypointReached event (events without an Originator fire anywhere).
+        Dictionary<int, ExportEntry> events = new Dictionary<int, ExportEntry>();
+        foreach (ExportEntry e in pcc.Exports.Where(e => e.ClassName == "BioSeqEvt_WaypointSet_WaypointReached"))
+        {
+            if (e.GetProperties().GetProp<ObjectProperty>("Originator")?.Value is int origin and not 0)
+                events.TryAdd(origin, e);
+        }
+        JsonArray points = new JsonArray();
+        // Each point's place in the path network (RouteWalkers).
+        List<string> keys = new List<string>();
+        foreach (StructProperty reference in set.GetProperties().GetProp<ArrayProperty<StructProperty>>("WaypointReferences") ?? Enumerable.Empty<StructProperty>())
+        {
+            if (!pcc.TryGetUExport(reference.GetProp<ObjectProperty>("Actor")?.Value ?? 0, out ExportEntry waypoint))
+                continue;
+            keys.Add(NavKey(pcc, waypoint));
+            Vector3 at = UnrealSpace.Position(UnrealTransform.ActorToWorld(waypoint.GetProperties()).Translation);
+            JsonObject point = new JsonObject { ["at"] = new JsonArray(at.X, at.Y, at.Z) };
+            // A BioWp_Kismet with no event of its own is walked through.
+            if (events.TryGetValue(waypoint.UIndex, out ExportEntry reached))
+                point["stop"] = StopAt(pcc, reached, asset, species);
+            points.Add(point);
+        }
+        if (points.Count < 2)
+        {
+            _walkersLeftOut.Add($"{name} ({points.Count} points)");
+            return null;
+        }
+
+        (float walkSpeed, float turnRate) = CreatureSpeed(pcc, type);
+        // The actor faces its +X; the node is the mesh's frame.
+        Vector3 forward = Vector3.Normalize(UnrealSpace.Direction(Vector3.TransformNormal(Vector3.UnitX, actorToMesh)));
+        _walkers++;
+        _walkerPoints += points.Count;
+        JsonObject result = new JsonObject
+        {
+            ["type"] = kind,
+            ["speed"] = walkSpeed * UnrealSpace.UnitsToMeters,
+            ["turn_rate"] = turnRate,
+            ["clip"] = clip,
+            ["clip_speed"] = WalkClipSpeed,
+            ["forward"] = new JsonArray(forward.X, forward.Y, forward.Z),
+            ["points"] = points,
+        };
+        _pendingWalks.Add((result, name, keys));
+        return result;
+    }
+
+    // ---------------------------------------------------------------
+    // PATHS (ME1's path network, for the legs a walker can't walk straight)
+    // ---------------------------------------------------------------
+    //
+    // ME1's BioAiController walks straight to the next point when it can reach it, and otherwise
+    // follows the level's path network (FindPathToward). That network is the ReachSpecs ME1's
+    // path builder made between NavigationPoints (path nodes, the walkers' own points, cover):
+    // Start is the point it leaves from, End the one it reaches, by Actor in the same sublevel or
+    // by the other point's NavGuid across sublevels. The path builder links two points directly
+    // only when nothing shorter joins them, so a leg without a ReachSpec of its own may still be
+    // walkable straight (most are) or not (the clinic loop's 7 -> 8 runs through a wall). Such a
+    // leg's first point carries "detour", the network's shortest route's nodes in between; the
+    // game takes it only when level collision blocks the straight line (LevelWalker._route), as
+    // ME1's reachability test does at run time.
+
+    // Path points by key (NavKey), in glTF space, and each one's links (the keys it reaches).
+    private readonly Dictionary<string, Vector3> _navPoints = new();
+    private readonly Dictionary<string, HashSet<string>> _navLinks = new();
+    private readonly List<(JsonObject Walk, string Name, List<string> Keys)> _pendingWalks = new();
+    private readonly List<string> _walkerRoutes = new();
+
+    // A NavigationPoint's key: its NavGuid, which other sublevels' ReachSpecs name it by, else its
+    // package and index.
+    private static string NavKey(IMEPackage pcc, ExportEntry point) =>
+        GuidKey(point.GetProperties().GetProp<StructProperty>("NavGuid"))
+        ?? $"{Path.GetFileNameWithoutExtension(pcc.FilePath)}:{point.UIndex}";
+
+    private static string GuidKey(StructProperty guid)
+    {
+        if (guid == null)
+            return null;
+        int[] parts = new[] { "A", "B", "C", "D" }.Select(n => guid.GetProp<IntProperty>(n)?.Value ?? 0).ToArray();
+        return parts.All(v => v == 0) ? null : string.Join(":", parts);
+    }
+
+    // A sublevel's part of the path network: its ReachSpecs (ProscribedReachSpecs forbid a link)
+    // and the points at their ends.
+    private void AddPathNetwork(IMEPackage pcc)
+    {
+        Dictionary<int, string> keys = new Dictionary<int, string>();
+        string Key(ExportEntry point)
+        {
+            if (!keys.TryGetValue(point.UIndex, out string key))
+            {
+                keys[point.UIndex] = key = NavKey(pcc, point);
+                _navPoints[key] = UnrealSpace.Position(UnrealTransform.ActorToWorld(point.GetProperties()).Translation);
+            }
+            return key;
+        }
+        foreach (ExportEntry spec in pcc.Exports.Where(e => e.ClassName.EndsWith("ReachSpec") && e.ClassName != "ProscribedReachSpec"))
+        {
+            PropertyCollection props = spec.GetProperties();
+            if (props.GetProp<BoolProperty>("bDisabled")?.Value == true
+                || !pcc.TryGetUExport(props.GetProp<ObjectProperty>("Start")?.Value ?? 0, out ExportEntry start))
+                continue;
+            StructProperty end = props.GetProp<StructProperty>("End");
+            string endKey = pcc.TryGetUExport(end?.GetProp<ObjectProperty>("Actor")?.Value ?? 0, out ExportEntry endPoint)
+                ? Key(endPoint)
+                : GuidKey(end?.GetProp<StructProperty>("Guid"));
+            if (endKey == null)
+                continue;
+            string startKey = Key(start);
+            if (!_navLinks.TryGetValue(startKey, out HashSet<string> links))
+                _navLinks[startKey] = links = new HashSet<string>();
+            links.Add(endKey);
+        }
+    }
+
+    // Gives each walker leg without a ReachSpec of its own the network's shortest route.
+    private void RouteWalkers()
+    {
+        foreach ((JsonObject walk, string name, List<string> keys) in _pendingWalks)
+        {
+            JsonArray points = walk["points"].AsArray();
+            bool loop = walk["type"]?.GetValue<string>() == "loop";
+            int legs = loop ? keys.Count : keys.Count - 1;
+            for (int leg = 0; leg < legs; leg++)
+            {
+                string from = keys[leg], to = keys[(leg + 1) % keys.Count];
+                if (_navLinks.TryGetValue(from, out HashSet<string> direct) && direct.Contains(to))
+                    continue;
+                List<string> path = ShortestPath(from, to);
+                if (path == null)
+                {
+                    _walkerRoutes.Add($"{name}: leg {leg} -> {(leg + 1) % keys.Count} has no ReachSpec and no route; walked straight.");
+                    continue;
+                }
+                // The nodes between the ends, in walking order.
+                JsonArray detour = new JsonArray();
+                for (int i = 1; i < path.Count - 1; i++)
+                {
+                    Vector3 at = _navPoints[path[i]];
+                    detour.Add(new JsonArray(at.X, at.Y, at.Z));
+                }
+                points[leg]!["detour"] = detour;
+                _walkerRoutes.Add($"{name}: leg {leg} -> {(leg + 1) % keys.Count} has no ReachSpec; detour through {detour.Count} path nodes.");
+            }
+        }
+    }
+
+    // The shortest route through the path network (Dijkstra by straight-line length), or null.
+    private List<string> ShortestPath(string from, string to)
+    {
+        if (!_navPoints.ContainsKey(from) || !_navPoints.ContainsKey(to))
+            return null;
+        Dictionary<string, float> best = new Dictionary<string, float> { [from] = 0f };
+        Dictionary<string, string> previous = new Dictionary<string, string>();
+        PriorityQueue<string, float> open = new PriorityQueue<string, float>();
+        open.Enqueue(from, 0f);
+        while (open.TryDequeue(out string current, out float cost))
+        {
+            if (current == to)
+                break;
+            if (cost > best[current] || !_navLinks.TryGetValue(current, out HashSet<string> links))
+                continue;
+            foreach (string next in links)
+            {
+                if (!_navPoints.TryGetValue(next, out Vector3 nextAt))
+                    continue;
+                float total = cost + Vector3.Distance(_navPoints[current], nextAt);
+                if (best.TryGetValue(next, out float known) && known <= total)
+                    continue;
+                best[next] = total;
+                previous[next] = current;
+                open.Enqueue(next, total);
+            }
+        }
+        if (!best.ContainsKey(to))
+            return null;
+        List<string> path = new List<string> { to };
+        while (path[^1] != from)
+            path.Add(previous[path[^1]]);
+        path.Reverse();
+        return path;
+    }
+
+    // A stop's pose and wait, from the Kismet its WaypointReached event runs: delays, then either
+    // a resumed walk or an in-place action station (a SequenceReference) left at random.
+    private JsonObject StopAt(IMEPackage pcc, ExportEntry reached, PawnAsset asset, string species)
+    {
+        float delay = 0f;
+        bool atStation = false;
+        ExportEntry station = null;
+        ExportEntry op = reached;
+        for (int step = 0; step < 8 && !atStation; step++)
+        {
+            op = FirstOutput(pcc, op);
+            if (op == null || op.ClassName == "BioSeqAct_ResumeWalking")
+                break;
+            if (op.ClassName is "BioSeqAct_Delay" or "SeqAct_Delay")
+                delay += op.GetProperties().GetProp<FloatProperty>("Duration")?.Value ?? 1f;
+            else if (op.ClassName == "SequenceReference")
+            {
+                atStation = true;
+                station = StationIn(pcc, op);
+            }
+        }
+
+        JsonObject stop = new JsonObject();
+        StructProperty entrance = station?.GetProperties().GetProp<StructProperty>("m_EntranceTransition");
+        string poseSet = entrance?.GetProp<NameProperty>("nmPoseSet")?.Value.Instanced;
+        string poseAnim = entrance?.GetProp<NameProperty>("nmPoseAnim")?.Value.Instanced;
+        if (poseSet is not (null or "None") && poseAnim is not (null or "None") && BakeClip(asset, poseSet, poseAnim, species) is string pose)
+            stop["pose"] = pose;
+        stop["wait"] = atStation
+            ? new JsonArray(delay + StationWaitMin, delay + StationWaitMax)
+            : new JsonArray(delay, delay);
+        return stop;
+    }
+
+    // The first op a sequence op's outputs lead to.
+    private static ExportEntry FirstOutput(IMEPackage pcc, ExportEntry op)
+    {
+        foreach (StructProperty output in op.GetProperties().GetProp<ArrayProperty<StructProperty>>("OutputLinks") ?? Enumerable.Empty<StructProperty>())
+        {
+            foreach (StructProperty target in output.GetProp<ArrayProperty<StructProperty>>("Links") ?? Enumerable.Empty<StructProperty>())
+            {
+                if (pcc.TryGetUExport(target.GetProp<ObjectProperty>("LinkedOp")?.Value ?? 0, out ExportEntry next))
+                    return next;
+            }
+        }
+        return null;
+    }
+
+    // The action station a SequenceReference plays (BIOG_ActionStations_Q's prefab sequences).
+    private static ExportEntry StationIn(IMEPackage pcc, ExportEntry reference)
+    {
+        if (!pcc.TryGetUExport(reference.GetProperties().GetProp<ObjectProperty>("oSequenceReference")?.Value ?? 0, out ExportEntry sequence))
+            return null;
+        return pcc.Exports.FirstOrDefault(e => e.ClassName == "BioSeqAct_ActionStation" && IsUnder(e, sequence));
+    }
+
+    private static bool IsUnder(IEntry entry, IEntry ancestor)
+    {
+        for (IEntry parent = entry.Parent; parent != null; parent = parent.Parent)
+        {
+            if (parent.UIndex == ancestor.UIndex)
+                return true;
+        }
+        return false;
+    }
+
+    // The pawn's walk speed (uu/s) and turn rate (degrees/s): its appearance's CreatureSpeed row
+    // ("Default" when it names none).
+    private (float Walk, float Turn) CreatureSpeed(IMEPackage pcc, ExportEntry type)
+    {
+        if (_creatureSpeeds == null)
+        {
+            _creatureSpeeds = new Dictionary<string, (float, float)>(StringComparer.OrdinalIgnoreCase);
+            using IMEPackage engine = MEPackageHandler.OpenMEPackage(Program.ResolvePackage(CreatureSpeedsPackage));
+            if (engine.Exports.FirstOrDefault(e => e.InstancedFullPath == CreatureSpeedsTable) is ExportEntry export)
+            {
+                Bio2DA table = new Bio2DA(export);
+                List<string> columns = table.ColumnNames.ToList();
+                int walkColumn = columns.IndexOf("WalkSpeed");
+                int turnColumn = columns.IndexOf("HighTurnSpeed");
+                for (int row = 0; row < table.RowCount && walkColumn >= 0 && turnColumn >= 0; row++)
+                {
+                    if (float.TryParse(table[row, walkColumn]?.DisplayableValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float walkSpeed)
+                        && float.TryParse(table[row, turnColumn]?.DisplayableValue, NumberStyles.Float, CultureInfo.InvariantCulture, out float turn))
+                        _creatureSpeeds[table.RowNames[row]] = (walkSpeed, turn);
+                }
+            }
+        }
+        string speed = "Default";
+        if (type != null && pcc.TryGetUExport(type.GetProperties().GetProp<ObjectProperty>("m_oAppearance")?.Value ?? 0, out ExportEntry appearance)
+            && InheritedProp<NameProperty>(appearance, "CreatureSpeed")?.Value.Instanced is string named && named != "None")
+            speed = named;
+        // ME1's Default row, when the table can't be read.
+        return _creatureSpeeds.TryGetValue(speed, out (float Walk, float Turn) found) ? found : (150f, 720f);
     }
 
     // Bakes a clip onto a model once, under the AnimSequence's name (shared by every model that
