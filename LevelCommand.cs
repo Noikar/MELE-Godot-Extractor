@@ -82,6 +82,10 @@ public static class LevelCommand
     // takes one component of a collection actor, such as one light; repeatable), each
     // optionally followed by "--borrow-clip <min x,y,z> <max x,y,z>" (glTF space: its meshes
     // keep only the triangles and collision touching that box, e.g. the bottom of a shaft).
+    // "--streaming <package> <state>" keeps only the packages whose chunk the BioTriggerStreams
+    // of another package (the persistent level) show in that streaming state (e.g. ME1/BIOA_STA00.pcc
+    // Default: a normal visit), plus chunks no volume names at all (see StreamingFilter), and
+    // "--streaming-extra <chunks>" (comma-separated) keeps those chunks too.
     // steps reports each package read, the build, and the save (and laterSteps more the caller
     // runs after it, such as the music) for the game's progress bar.
     public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
@@ -94,6 +98,8 @@ public static class LevelCommand
         List<string> streamSources = new List<string>();
         List<(string Package, string[] Actors, (Vector3, Vector3)? Clip)> borrowSources = new List<(string Package, string[] Actors, (Vector3, Vector3)? Clip)>();
         string npcs = null;
+        (string Package, string State)? streaming = null;
+        string[] streamingExtra = [];
         int maxTexture = 1024;
         float mergeCell = LevelBuilder.DefaultMergeCell;
         (Vector3, Vector3)? collisionBounds = null;
@@ -116,6 +122,10 @@ public static class LevelCommand
                 streamSources.Add(args[++i]);
             else if (args[i] == "--npcs" && i + 1 < args.Length)
                 npcs = args[++i];
+            else if (args[i] == "--streaming" && i + 2 < args.Length)
+                streaming = (args[++i], args[++i]);
+            else if (args[i] == "--streaming-extra" && i + 1 < args.Length)
+                streamingExtra = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             else if (args[i] == "--collision-bounds" && i + 2 < args.Length)
                 collisionBounds = (ParseVector(args[++i]), ParseVector(args[++i]));
             else if (args[i] == "--borrow" && i + 2 < args.Length)
@@ -127,6 +137,11 @@ public static class LevelCommand
         }
 
         string[] files = patterns.SelectMany(ExpandPackages).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (streaming is (string streamPackage, string streamState))
+        {
+            using IMEPackage pcc = MEPackageHandler.OpenMEPackage(ExpandPackages(streamPackage).First());
+            files = StreamingFilter(pcc, streamState, streamingExtra, files);
+        }
         if (files.Length == 0)
         {
             Console.Error.WriteLine("No packages matched.");
@@ -182,6 +197,52 @@ public static class LevelCommand
         builder.Write(outPath);
         MaterialBaker.ForgetDecoded();
         return 0;
+    }
+
+    // The files whose chunk (LevelBuilder.Chunk) ME1 shows in a streaming state: some volume's
+    // state of that name lists it in VisibleChunkNames (LoadChunkNames alone is loaded but hidden,
+    // such as the Wards' 07toss cutscene set). A volume's first state named None counts as
+    // Default (63 of the Citadel's 154 volumes, all free-roam ones). Chunks that no state of any
+    // volume names are always kept (sublevels ME1 doesn't stream by volume), as are the extras.
+    private static string[] StreamingFilter(IMEPackage pcc, string state, string[] extra, string[] files)
+    {
+        HashSet<string> shown = new HashSet<string>(extra, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> named = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (ExportEntry actor in pcc.Exports.Where(e => e.ClassName == "BioTriggerStream"))
+        {
+            ArrayProperty<StructProperty> states = actor.GetProperties().GetProp<ArrayProperty<StructProperty>>("StreamingStates");
+            for (int i = 0; i < (states?.Count ?? 0); i++)
+            {
+                PropertyCollection entry = states[i].Properties;
+                string name = entry.GetProp<NameProperty>("StateName")?.Value.Instanced ?? "None";
+                bool match = name.Equals(state, StringComparison.OrdinalIgnoreCase)
+                    || (i == 0 && name == "None" && state.Equals("Default", StringComparison.OrdinalIgnoreCase));
+                foreach (string list in (string[])["VisibleChunkNames", "LoadChunkNames", "UnloadChunkNames"])
+                {
+                    foreach (NameProperty chunk in entry.GetProp<ArrayProperty<NameProperty>>(list) ?? Enumerable.Empty<NameProperty>())
+                    {
+                        named.Add(chunk.Value.Instanced);
+                        if (match && list == "VisibleChunkNames")
+                            shown.Add(chunk.Value.Instanced);
+                    }
+                }
+            }
+        }
+
+        List<string> kept = new List<string>();
+        SortedSet<string> left = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (string file in files)
+        {
+            string chunk = LevelBuilder.Chunk(Path.GetFileNameWithoutExtension(file));
+            if (shown.Contains(chunk) || !named.Contains(chunk))
+                kept.Add(file);
+            else
+                left.Add(chunk);
+        }
+        Console.WriteLine($"Streaming state {state} ({Path.GetFileNameWithoutExtension(pcc.FilePath)}): {kept.Count} of {files.Length} packages"
+            + (left.Count > 0 ? $"; left out {string.Join(", ", left)}" : "")
+            + (extra.Length > 0 ? $"; kept besides it {string.Join(", ", extra)}" : "") + ".");
+        return kept.ToArray();
     }
 
     // "x,y,z" -> a vector, in the invariant culture.

@@ -211,6 +211,14 @@ public static class ManifestCommand
         // The streaming volumes that show the level's areas, from the same kind of package.
         if (entry.TryGetProperty("stream_volumes", out JsonElement streamVolumes))
             args.AddRange(["--stream-volumes", streamVolumes.GetString()]);
+        // Only the sublevels ME1 shows in one streaming state: { "package": <persistent level>,
+        // "state": "Default", "extra": [<chunks kept besides it>] }.
+        if (entry.TryGetProperty("streaming", out JsonElement streaming))
+        {
+            args.AddRange(["--streaming", streaming.GetProperty("package").GetString(), streaming.GetProperty("state").GetString()]);
+            if (streaming.TryGetProperty("extra", out JsonElement extra))
+                args.AddRange(["--streaming-extra", string.Join(",", extra.EnumerateArray().Select(c => c.GetString()))]);
+        }
         // Merged chunks (LevelMerge.cs): "merge": false leaves every mesh separate, and
         // "merge_cell" sets their world cells' size in meters.
         if (entry.TryGetProperty("merge", out JsonElement merge) && merge.ValueKind == JsonValueKind.False)

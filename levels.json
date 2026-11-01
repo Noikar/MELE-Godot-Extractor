@@ -1,14 +1,15 @@
 {
-  "version": 29,
+  "version": 30,
   "levels": [
     {
       "id": "wards",
       "label": "Citadel Wards",
       "map": "Wards",
-      "note": "ME1 BIOA_STA60 sublevels. Geometry is in _LAY, _ART, and _PLC; blocking volumes are in the base _DSG. The single-letter _DSG variants (02a, 05A, ...) and 09casino hold the furnishings (market stalls, bar seating, clinic beds, casino tables); the named plot-state variants (01destiny, 03quarian, 11news, ...) are left out. Ambient sounds are in the _SND sublevels (and 05A_DSG: Chora's Den's music). The Flux and ChorasDen music volumes silence the area music; their clubs play their own as AmbientSounds.",
+      "note": "ME1 BIOA_STA60 sublevels, those ME1 shows in a normal visit (the Default streaming state of BIOA_STA00's BioTriggerStreams), plus 05B. Geometry is in _LAY, _ART, and _PLC; blocking volumes are in the base _DSG. The _DSG variants hold the furnishings (market stalls, bar seating, clinic beds, casino tables) and the crowd: Default takes 01nodest, 02rail, 08nodest, and 05women (Chora's Den's dancers) and leaves out the story states' (01destiny, 01scenic, 03quarian, 07toss, 08destiny, 11news). 05B, Fist's hideout as set for the fight (state_choraslockdown), is kept for its crates and extinguishers; its armed guards aren't ambient. Ambient sounds are in the _SND sublevels (and 05A_DSG: Chora's Den's music). The Flux and ChorasDen music volumes silence the area music; their clubs play their own as AmbientSounds.",
       "music": ["Wards", "Flux", "ChorasDen"],
       "music_volumes": "ME1/BIOA_STA00.pcc",
       "stream_volumes": "ME1/BIOA_STA00.pcc",
+      "streaming": { "package": "ME1/BIOA_STA00.pcc", "state": "Default", "extra": ["BIOA_STA60_05B"] },
       "markers": { "package": "ME1/BIOA_STA00.pcc", "tags": "start_sta60_*" },
       "transit": { "package": "ME1/BIOA_STA00.pcc", "tags": "stage_callCab?" },
       "npcs": "*_amb_*,Keeper",
@@ -17,10 +18,8 @@
         "ME1/BIOA_STA60_??_LAY.pcc",
         "ME1/BIOA_STA60_??_ART.pcc",
         "ME1/BIOA_STA60_??_PLC.pcc",
-        "ME1/BIOA_STA60_??_DSG.pcc",
-        "ME1/BIOA_STA60_??_SND.pcc",
-        "ME1/BIOA_STA60_???_DSG.pcc",
-        "ME1/BIOA_STA60_09casino_DSG.pcc"
+        "ME1/BIOA_STA60_*_DSG.pcc",
+        "ME1/BIOA_STA60_??_SND.pcc"
       ]
     },
     {
