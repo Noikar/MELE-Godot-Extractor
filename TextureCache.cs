@@ -49,6 +49,13 @@ public class TextureCache
     // level to embed. Shared across packages, like the images.
     public Dictionary<string, MemoryImage?> CarriedTextures { get; init; }
 
+    // Level surfaces (--light-passes): lit materials also carry UE3's per-light passes, over a
+    // static shadow map or unshadowed (the directional, spot, and point TLightPixelShader with
+    // FShadowTexturePolicy or FNoStaticShadowingPolicy), for the lights a level draws live instead of baking into its
+    // lightmaps (LE3's MP maps: their sun and floodlights). Off for the levels that never
+    // needed them, so their output stays as it was.
+    public bool LightPasses { get; init; }
+
     // Characters: bake each material's color and normal map from its compiled shader
     // (ShaderBaker), falling back to MaterialBaker's recipes and the plain diffuse.
     public bool BakeShaders { get; init; }
@@ -75,6 +82,19 @@ public class TextureCache
     private ShaderTranslator.Policy[] UnlitPolicies => SharedShaders
         ? [ShaderTranslator.Policy.Unlit, ShaderTranslator.Policy.Distortion]
         : [ShaderTranslator.Policy.Unlit];
+
+    // A lit level material's translations, and with LightPasses its per-light passes too.
+    private static readonly ShaderTranslator.Policy[] LitPolicies =
+    [
+        ShaderTranslator.Policy.TextureLightmap, ShaderTranslator.Policy.VertexLightmap, ShaderTranslator.Policy.Unlit,
+        ShaderTranslator.Policy.LightEnvironment,
+    ];
+    private static readonly ShaderTranslator.Policy[] LitPoliciesWithLights =
+    [
+        .. LitPolicies, ShaderTranslator.Policy.LightDirectional, ShaderTranslator.Policy.LightSpot,
+        ShaderTranslator.Policy.LightPoint, ShaderTranslator.Policy.LightDirectionalUnshadowed,
+        ShaderTranslator.Policy.LightSpotUnshadowed, ShaderTranslator.Policy.LightPointUnshadowed,
+    ];
 
     // A character's own appearance (a BioMaterialOverride: skin tone, hair color, face
     // textures), which wins over every material instance's defaults.
@@ -334,8 +354,7 @@ public class TextureCache
             shading = AddSurfaceMaps(builder, material, textures.Values, diffuse);
             if (CarriedTextures != null && baseMaterial != null)
                 shading += AddTranslatedShader(builder, baseMaterial, material, textures, colors, scalars, alphas,
-                    ShaderTranslator.Policy.TextureLightmap, ShaderTranslator.Policy.VertexLightmap, ShaderTranslator.Policy.Unlit,
-                    ShaderTranslator.Policy.LightEnvironment);
+                    LightPasses ? LitPoliciesWithLights : LitPolicies);
         }
 
         string source = recipe != null ? $"baked ({recipe})"
@@ -748,7 +767,7 @@ public class TextureCache
                 // materials that distort have a distortion pass.
                 if (!(policy is ShaderTranslator.Policy.Unlit or ShaderTranslator.Policy.LightEnvironment
                         && policies.Contains(ShaderTranslator.Policy.TextureLightmap))
-                    && policy != ShaderTranslator.Policy.Distortion)
+                    && policy != ShaderTranslator.Policy.Distortion && !ShaderTranslator.IsLightPass(policy))
                     notes.Add($"{key}: no shader");
                 continue;
             }

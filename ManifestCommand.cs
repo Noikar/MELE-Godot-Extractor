@@ -225,6 +225,9 @@ public static class ManifestCommand
             args.AddRange(["--merge-cell", "0"]);
         else if (entry.TryGetProperty("merge_cell", out JsonElement mergeCell))
             args.AddRange(["--merge-cell", mergeCell.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)]);
+        // Lights drawn live over static shadow maps (LE3's MP maps), as LevelBuilder.LightPasses.
+        if (entry.TryGetProperty("light_passes", out JsonElement lightPasses) && lightPasses.ValueKind == JsonValueKind.True)
+            args.Add("--light-passes");
         // The playable area, { "min": [x, y, z], "max": [x, y, z] } in glTF space: collision
         // entirely outside it is dropped (LevelBuilder.CollisionBounds).
         static string Corner(JsonElement box, string key) => string.Join(",", box.GetProperty(key).EnumerateArray()

@@ -22,16 +22,34 @@ public static class ShaderTranslator
     // lockers, the elevators) drew with their light environment's policy: one dominant light
     // with diffuse and specular, plus second-order spherical harmonics for the rest. Distortion
     // is a material's distortion pass (ME3's effects: the biotic ripple), which writes screen
-    // offsets UE3 accumulates and then applies to the scene behind.
-    public enum Policy { TextureLightmap, VertexLightmap, Unlit, LightEnvironment, Distortion }
+    // offsets UE3 accumulates and then applies to the scene behind. The light passes are UE3's
+    // per-light additive passes over a static shadow map, for lights a level draws live instead
+    // of baking them into its lightmaps (LE3's MP maps: the sun and the floodlights).
+    // A light pass without a shadow map is the same light where Lightmass found nothing in its way.
+    public enum Policy
+    {
+        TextureLightmap, VertexLightmap, Unlit, LightEnvironment, Distortion,
+        LightDirectional, LightSpot, LightPoint, LightDirectionalUnshadowed, LightSpotUnshadowed, LightPointUnshadowed,
+    }
 
-    // The base-pass shader each policy draws with (without sky light).
+    public static bool IsLightPass(Policy policy) => policy >= Policy.LightDirectional;
+
+    // Whether a light pass reads a static shadow map (FShadowTexturePolicy), whose UVs come first.
+    private static bool ShadowTexturePass(Policy policy) => policy is Policy.LightDirectional or Policy.LightSpot or Policy.LightPoint;
+
+    // The shader each policy draws with (the base passes without sky light).
     public static string ShaderType(Policy policy) => policy switch
     {
         Policy.TextureLightmap => "TBasePassPixelShaderFDirectionalLightMapTexturePolicyNoSkyLight",
         Policy.VertexLightmap => "TBasePassPixelShaderFDirectionalVertexLightMapPolicyNoSkyLight",
         Policy.LightEnvironment => "TBasePassPixelShaderFSHLightLightMapPolicyNoSkyLight",
         Policy.Distortion => "TDistortionMeshPixelShader<FDistortMeshAccumulatePolicy>",
+        Policy.LightDirectional => "TLightPixelShaderFDirectionalLightPolicyFShadowTexturePolicy",
+        Policy.LightSpot => "TLightPixelShaderFSpotLightPolicyFShadowTexturePolicy",
+        Policy.LightPoint => "TLightPixelShaderFPointLightPolicyFShadowTexturePolicy",
+        Policy.LightDirectionalUnshadowed => "TLightPixelShaderFDirectionalLightPolicyFNoStaticShadowingPolicy",
+        Policy.LightSpotUnshadowed => "TLightPixelShaderFSpotLightPolicyFNoStaticShadowingPolicy",
+        Policy.LightPointUnshadowed => "TLightPixelShaderFPointLightPolicyFNoStaticShadowingPolicy",
         _ => "TBasePassPixelShaderFNoLightMapPolicyNoSkyLight",
     };
 
@@ -42,6 +60,12 @@ public static class ShaderTranslator
         Policy.VertexLightmap => "vertex",
         Policy.LightEnvironment => "environment",
         Policy.Distortion => "distortion",
+        Policy.LightDirectional => "light_directional",
+        Policy.LightSpot => "light_spot",
+        Policy.LightPoint => "light_point",
+        Policy.LightDirectionalUnshadowed => "light_directional_unshadowed",
+        Policy.LightSpotUnshadowed => "light_spot_unshadowed",
+        Policy.LightPointUnshadowed => "light_point_unshadowed",
         _ => "unlit",
     };
 
@@ -82,8 +106,21 @@ public static class ShaderTranslator
     // they read CameraWorldPos, and otherwise in clip space (screen position and depth).
     // The material UVs come in pairs, channels 0 and 1 in one register and 2 and 3 in the next
     // (in_uv_extra, which only meshes whose materials read it carry).
+    // A light pass has the static shadow map's UVs in TEXCOORD0 and the material UVs in
+    // TEXCOORD1 (and 2), or without a shadow map the material UVs in TEXCOORD0 (and 1); the light's direction in tangent space in TEXCOORD4 (toward it; a spot or
+    // point light's unnormalized); a spot or point light's world-space vector to the light over
+    // its radius in TEXCOORD5 (its falloff); and in TEXCOORD7 the position the screen-space light
+    // attenuation (UE3's dynamic shadows) is read at.
     private static string Input(Policy policy, string semantic, int index, bool worldPosition, bool lightIn3) => (semantic, index) switch
     {
+        ("TEXCOORD", 0) when ShadowTexturePass(policy) => "in_shadow_uv",
+        ("TEXCOORD", 1) when ShadowTexturePass(policy) => "in_uv",
+        ("TEXCOORD", 2) when ShadowTexturePass(policy) => "in_uv_extra",
+        ("TEXCOORD", 0) when IsLightPass(policy) => "in_uv",
+        ("TEXCOORD", 1) when IsLightPass(policy) => "in_uv_extra",
+        ("TEXCOORD", 4) when IsLightPass(policy) => "in_light_vector",
+        ("TEXCOORD", 5) when IsLightPass(policy) => "in_light_falloff",
+        ("TEXCOORD", 7) when IsLightPass(policy) => "in_screen_position",
         ("TEXCOORD", 10) => "in_tangent_x",
         ("TEXCOORD", 11) => "in_tangent_z",
         ("COLOR", 0) => "in_color",
@@ -123,6 +160,8 @@ public static class ShaderTranslator
 
         private readonly SortedSet<int> _textures = new(), _cubes = new(), _vectors = new(), _scalars = new();
         private readonly SortedSet<int> _usedInputs = new(), _outputs = new();
+        // The light passes' own samplers it reads (shadow_texture, light_attenuation_texture).
+        private readonly HashSet<string> _special = new();
         private int _temps;
         // The texture channels (slot, channel) each register component's value derives from,
         // through any arithmetic but not through sample coordinates, by "r0.x". A discard
@@ -187,6 +226,12 @@ public static class ShaderTranslator
                         _resources[register] = ("lightmap_directional", false);
                     else if (name == "SceneDepthTexture")
                         _resources[register] = ("scene_depth_texture", false);
+                    // A light pass's static shadow map, and the screen-space light attenuation
+                    // UE3 renders dynamic shadows into (white here: characters' shadows are ours).
+                    else if (name == "ShadowTexture" && IsLightPass(policy))
+                        _resources[register] = ("shadow_texture", false);
+                    else if (name == "LightAttenuationTexture" && IsLightPass(policy))
+                        _resources[register] = ("light_attenuation_texture", false);
                     else
                         throw new NotSupportedException($"resource {name}");
                 }
@@ -249,6 +294,10 @@ public static class ShaderTranslator
                 uniforms.AppendLine($"uniform float pixel_scalar_{s};");
             if (_sceneDepth)
                 uniforms.AppendLine("uniform sampler2D scene_depth_texture : hint_depth_texture, filter_nearest;");
+            if (_special.Contains("shadow_texture"))
+                uniforms.AppendLine("uniform sampler2D shadow_texture : filter_linear, repeat_disable;");
+            if (_special.Contains("light_attenuation_texture"))
+                uniforms.AppendLine("uniform sampler2D light_attenuation_texture : hint_default_white, filter_nearest;");
             return new Translation(uniforms.ToString(), code.ToString(), _textures, _cubes, _vectors, _scalars, _cutouts);
         }
 
@@ -271,6 +320,19 @@ public static class ShaderTranslator
             bool saturate = opcode.EndsWith("_sat");
             string op = saturate ? opcode[..^4] : opcode;
             string S(int i) => Source(operands[i]);
+            // Branches (the light passes' dynamic-shadow test): Direct3D tests the bits. The
+            // texture-channel flow (Track) isn't split per branch; it only feeds cutouts.
+            switch (op)
+            {
+                case "if_nz":
+                    return $"if (floatBitsToUint({S(0)}.x) != 0u) {{";
+                case "if_z":
+                    return $"if (floatBitsToUint({S(0)}.x) == 0u) {{";
+                case "else":
+                    return "} else {";
+                case "endif":
+                    return "}";
+            }
             Track(op, operands);
 
             if (op.StartsWith("sample"))
@@ -423,7 +485,9 @@ public static class ShaderTranslator
 
         private void UseResource(string name)
         {
-            if (name.StartsWith("texture_"))
+            if (name is "shadow_texture" or "light_attenuation_texture")
+                _special.Add(name);
+            else if (name.StartsWith("texture_"))
                 _textures.Add(int.Parse(name["texture_".Length..]));
             else if (name.StartsWith("cube_"))
                 _cubes.Add(int.Parse(name["cube_".Length..]));
@@ -474,6 +538,11 @@ public static class ShaderTranslator
                     break;
                 case "cb" when number == 2 && m.Groups["idx"].Success && m.Groups["idx"].Value == "1":
                     value = $"min_z_max_z_ratio.{swizzle}";
+                    break;
+                // VSOffsetConstants (the view-projection matrix): a light pass reads it only to
+                // place its screen-space dynamic shadows, which bReceiveDynamicShadows (0) skips.
+                case "cb" when number == 1 && IsLightPass(_policy):
+                    value = "vec4(0.0)";
                     break;
                 case "cb" when number == 0 && m.Groups["idx"].Success:
                 {
@@ -538,6 +607,19 @@ public static class ShaderTranslator
                 // per color in 7 registers (the game packs them).
                 "LightColorAndFalloffExponent" when _policy == Policy.LightEnvironment => c < 3 ? $"light_color.{xyzw[c]}" : "0.0",
                 "WorldIncidentLighting" when _policy == Policy.LightEnvironment => $"world_incident_lighting[{element}].{xyzw[c]}",
+                // A light pass's light: its color times brightness (a spot or point light's
+                // falloff exponent in w), and a spot's direction (where it shines, Unreal axes) and
+                // cone (cos outer, 1 / (cos inner - cos outer)). UE3's screen-space dynamic shadows
+                // and their distance fade are off: characters' shadows are drawn our own way.
+                "LightColor" when IsLightPass(_policy) => c < 3 ? $"light_color.{xyzw[c]}" : "0.0",
+                "LightColorAndFalloffExponent" when IsLightPass(_policy) => $"light_color.{xyzw[c]}",
+                "SpotDirection" when IsLightPass(_policy) => c < 3 ? $"spot_direction.{xyzw[c]}" : "0.0",
+                "SpotAngles" when IsLightPass(_policy) => c < 2 ? $"spot_angles.{xyzw[c]}" : "0.0",
+                "bReceiveDynamicShadows" or "bEnableDistanceShadowFading" or "DistanceFadeParameters" or "DistanceFieldParameters"
+                    when IsLightPass(_policy) => "0.0",
+                // A two-sided material's light pass flips the normal on back faces: UE3 draws the
+                // back faces in a pass of their own with -1; ours draw both at once.
+                "TwoSidedSign" when IsLightPass(_policy) => "(floatBitsToUint(in_front_face.x) != 0u ? 1.0 : -1.0)",
                 // The same screen-position scale and bias PSOffsetConstants carries elsewhere.
                 "ScreenPositionScaleBias" => $"screen_position_scale_bias.{xyzw[c]}",
                 // Without a lightmap (particles), a lit material adds its diffuse times the

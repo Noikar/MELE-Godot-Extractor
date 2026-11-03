@@ -86,6 +86,8 @@ public static class LevelCommand
     // of another package (the persistent level) show in that streaming state (e.g. ME1/BIOA_STA00.pcc
     // Default: a normal visit), plus chunks no volume names at all (see StreamingFilter), and
     // "--streaming-extra <chunks>" (comma-separated) keeps those chunks too.
+    // "--light-passes" exports the lights a level draws live over static shadow maps (LE3's MP
+    // maps' sun and floodlights; see LevelBuilder.LightPasses).
     // steps reports each package read, the build, and the save (and laterSteps more the caller
     // runs after it, such as the music) for the game's progress bar.
     public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
@@ -103,6 +105,7 @@ public static class LevelCommand
         int maxTexture = 1024;
         float mergeCell = LevelBuilder.DefaultMergeCell;
         (Vector3, Vector3)? collisionBounds = null;
+        bool lightPasses = false;
         string soundsDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
         for (int i = 0; i < args.Length; i++)
         {
@@ -132,6 +135,8 @@ public static class LevelCommand
                 borrowSources.Add((args[++i], args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries), null));
             else if (args[i] == "--borrow-clip" && i + 2 < args.Length && borrowSources.Count > 0)
                 borrowSources[^1] = borrowSources[^1] with { Clip = (ParseVector(args[++i]), ParseVector(args[++i])) };
+            else if (args[i] == "--light-passes")
+                lightPasses = true;
             else
                 patterns.Add(args[i]);
         }
@@ -148,7 +153,10 @@ public static class LevelCommand
             return 1;
         }
 
-        LevelBuilder builder = new LevelBuilder(maxTexture, soundsDir) { MergeCell = mergeCell, CollisionBounds = collisionBounds, Steps = steps };
+        LevelBuilder builder = new LevelBuilder(maxTexture, soundsDir)
+        {
+            MergeCell = mergeCell, CollisionBounds = collisionBounds, Steps = steps, LightPasses = lightPasses,
+        };
         if (steps != null)
             steps.Total = files.Length + borrowSources.Count + 2 + laterSteps;
         if (npcs != null)
@@ -398,6 +406,14 @@ public partial class LevelBuilder
     // where it would reach into the other maps. The scenery still draws.
     public (Vector3 Min, Vector3 Max)? CollisionBounds { get; set; }
 
+    // --light-passes: lights UE3 drew live over static shadow maps instead of baking them into
+    // the lightmaps (LE3's MP maps: the sun and the floodlights; every lightmapped surface they
+    // reach is black without them). Lit materials carry their per-light passes, each lightmapped
+    // instance the lights it draws live ("me_light_passes": each light's GUID, its shadow map's
+    // page or -1, the atlas scale and bias; LevelLightPasses.cs), and each light its GUID, linear
+    // color, and cone. Off by default, so the levels that never needed it export as before.
+    public bool LightPasses { get; set; }
+
     // While a borrow with a clip is read (--borrow-clip): the box in glTF space its meshes are
     // cut to (MeshGeometry.Clipped).
     private (Vector3 Min, Vector3 Max)? _clip;
@@ -472,6 +488,7 @@ public partial class LevelBuilder
             // Follow imports into the shared packages: LE1's remastered effects (the steam
             // jets' FXS_ME1_VentStream_METR_INST) parent to materials in BIOC_Materials.
             SharedShaders = true,
+            LightPasses = LightPasses,
         };
         NodeBuilder packageNode = _root.CreateNode(packageName);
         MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty> trimesh = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Trimesh_{packageName}");
@@ -1219,6 +1236,10 @@ public partial class LevelBuilder
 
         LightMap lightMap = ReadLightMap(component);
         JsonObject lighting = new JsonObject { ["type"] = "none" };
+        // A level with live lights keeps every instance on its own node: which lights reach it
+        // (and their shadow maps' place in their pages) are its own (LevelLightPasses.cs).
+        if (LightPasses)
+            mergeable = false;
         IMeshBuilder<MaterialBuilder> render;
         // The sections drawn on the instance's own node (the rest are merged).
         MaterialBuilder[] own = materials;
@@ -1298,6 +1319,9 @@ public partial class LevelBuilder
             packageNode.AddNode(node);
             node.LocalMatrix = UnrealTransform.ToGltf(world);
             _scene.AddRigidMesh(render, node);
+            // Lightmapped: which lights it draws live is settled once every light is read.
+            if (LightPasses && lighting["type"].GetValue<string>() != "none")
+                RecordLitInstance(pcc, component, node, geometry, world, lightMap);
         }
         _instances++;
         _receivers[component.UIndex] = (world, lighting);
@@ -2074,12 +2098,25 @@ public partial class LevelBuilder
         }
         if (LightLevels(component, props) is JsonArray levels)
             extras["ue_levels"] = levels;
+        // What a light pass needs (LightPasses): the GUID its instances' shadow maps name, its
+        // linear color (glTF's light color is ours to read back only through the importer), and
+        // a spot's own cone angles (the glTF ones are clamped to glTF's limits).
+        if (LightPasses)
+        {
+            extras["ue_guid"] = GuidText(props.GetProp<StructProperty>("LightGuid"));
+            extras["ue_color"] = new JsonArray(color.X, color.Y, color.Z);
+            if (component.ClassName is "SpotLightComponent" or "DominantSpotLightComponent")
+                extras["ue_cone"] = new JsonArray(props.GetProp<FloatProperty>("InnerConeAngle")?.Value ?? 0f,
+                    props.GetProp<FloatProperty>("OuterConeAngle")?.Value ?? 44f);
+        }
         NodeBuilder node = new NodeBuilder($"{component.ClassName.Replace("Component", "")}_{_lightCount}", extras);
         _lights.AddNode(node);
 
         // Unreal lights shine along their +X axis; glTF lights along their node's -Z.
         Vector3 position = UnrealSpace.Position(world.Translation);
         Vector3 forward = MeshCommand.SafeNormalize(UnrealSpace.Direction(new Vector3(world.M11, world.M12, world.M13)));
+        if (LightPasses)
+            RecordLiveLight(component, props, position, forward, radius, brightness);
         Vector3 up = MathF.Abs(forward.Y) > 0.99f ? Vector3.UnitX : Vector3.UnitY;
         node.LocalMatrix = Matrix4x4.CreateWorld(position, forward, up);
         _scene.AddLight(light, node);
@@ -2091,6 +2128,9 @@ public partial class LevelBuilder
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         // Every package's path network is in: route the walkers' legs ME1 can't walk straight.
         RouteWalkers();
+        // Every light is in: which ones each lightmapped instance draws live (LevelLightPasses.cs).
+        if (LightPasses)
+            AssignLightPasses();
         Steps?.Next("Building the level");
         AddMaterialTextures();
         Stopwatch clock = System.Diagnostics.Stopwatch.StartNew();
@@ -2109,6 +2149,8 @@ public partial class LevelBuilder
             Console.WriteLine($"Collision bounds {areaMin} to {areaMax}: dropped {_droppedHulls} hulls and {_droppedTriangles} collision triangles outside.");
         Console.WriteLine($"Original lighting: {_textureLit} instances from {_pageCount} lightmap pages, {_vertexLit} from vertex lightmaps, "
             + $"{_instances - _textureLit - _vertexLit} without; {_placeables} placeables.");
+        if (LightPasses)
+            Console.WriteLine(LightPassSummary());
         Console.WriteLine(MergeSummary());
         Console.WriteLine($"Particles: {_emitters} emitters from {_particleSystems.Count(s => s.Value.Count > 0)} of {_particleSystems.Count} systems.");
         Console.WriteLine($"Start markers: {_markerCount}.");
