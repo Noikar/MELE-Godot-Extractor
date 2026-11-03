@@ -89,7 +89,8 @@ public static class LevelCommand
     // "--light-passes" exports the lights a level draws live over static shadow maps (LE3's MP
     // maps' sun and floodlights; see LevelBuilder.LightPasses).
     // "--exclude <package> <actors>" (comma-separated, wildcards allowed; repeatable) leaves those
-    // actors of that package out entirely (Firebase White's Cerberus fighters flying overhead).
+    // actors of that package out entirely (Firebase White's Cerberus fighters flying overhead), or
+    // with "<actor>.<component>" one component of a collection actor (the fighter on its helipad).
     // steps reports each package read, the build, and the save (and laterSteps more the caller
     // runs after it, such as the music) for the game's progress bar.
     public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
@@ -430,6 +431,9 @@ public partial class LevelBuilder
     // patterns "<actor>.<component>" (one sky light of the Tower's StaticLightCollectionActor);
     // null keeps them all.
     private string[] _onlyComponents;
+    // While a collection actor is read: the component patterns --exclude leaves out of it.
+    private string[] _excludedComponents;
+    private int _excludedComponentCount;
     private int _pageCount, _textureLit, _vertexLit, _placeables, _emitters, _markerCount, _skeletalPlaceables;
     private int _decals, _decalMeshes, _decalsUnlit, _effects;
     private readonly Dictionary<string, int> _skipped = new();
@@ -516,6 +520,7 @@ public partial class LevelBuilder
         HashSet<string> matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string[] excludedHere = Excluded.TryGetValue(packageName, out string[] patterns) ? patterns : [];
         int excludedCount = 0;
+        int excludedComponentsBefore = _excludedComponentCount;
 
         Level level = ObjectBinary.From<Level>(levelExport);
         foreach (int actorIndex in level.Actors)
@@ -540,6 +545,12 @@ public partial class LevelBuilder
                     ? null
                     : hits.Select(p => p[(p.IndexOf('.') + 1)..]).ToArray();
             }
+            // "<actor>.<component>" exclusions: the components left out of this actor.
+            string[] componentExclusions = excludedHere
+                .Where(p => p.Contains('.') && FileSystemName.MatchesSimpleExpression(BorrowActor(p), actor.ObjectName.Instanced, ignoreCase: true))
+                .Select(p => p[(p.IndexOf('.') + 1)..])
+                .ToArray();
+            _excludedComponents = componentExclusions.Length > 0 ? componentExclusions : null;
             try
             {
                 if (actor.GetProperties().GetProp<ObjectProperty>("Decal") is ObjectProperty decalProp
@@ -556,6 +567,7 @@ public partial class LevelBuilder
             finally
             {
                 _onlyComponents = null;
+                _excludedComponents = null;
             }
         }
         foreach ((ExportEntry actor, ExportEntry component) in decals)
@@ -584,7 +596,8 @@ public partial class LevelBuilder
         Console.WriteLine($"{packageName}: {_instances - instancesBefore} mesh instances, {_lightCount - lightsBefore} lights, "
             + $"{_hullCount - hullsBefore} hulls, {_trimeshTriangles - trisBefore} collision triangles.");
         if (excludedHere.Length > 0)
-            Console.WriteLine($"Excluded {excludedCount} actors from {packageName} ({string.Join(", ", excludedHere)}).");
+            Console.WriteLine($"Excluded {excludedCount} actors and {_excludedComponentCount - excludedComponentsBefore} components "
+                + $"from {packageName} ({string.Join(", ", excludedHere)}).");
         if (only != null)
         {
             Console.WriteLine($"Borrowed {borrowed.Count} actors from {packageName}: {string.Join(", ", borrowed)}");
@@ -600,9 +613,17 @@ public partial class LevelBuilder
         return dot < 0 ? pattern : pattern[..dot];
     }
 
-    // Whether a collection actor's component is read (_onlyComponents).
-    private bool KeepsComponent(ExportEntry component) => _onlyComponents == null
-        || _onlyComponents.Any(p => FileSystemName.MatchesSimpleExpression(p, component.ObjectName.Instanced, ignoreCase: true));
+    // Whether a collection actor's component is read (_onlyComponents, _excludedComponents).
+    private bool KeepsComponent(ExportEntry component)
+    {
+        string name = component.ObjectName.Instanced;
+        if (_excludedComponents != null && _excludedComponents.Any(p => FileSystemName.MatchesSimpleExpression(p, name, ignoreCase: true)))
+        {
+            _excludedComponentCount++;
+            return false;
+        }
+        return _onlyComponents == null || _onlyComponents.Any(p => FileSystemName.MatchesSimpleExpression(p, name, ignoreCase: true));
+    }
 
     private void AddActor(IMEPackage pcc, ExportEntry actor, NodeBuilder packageNode, TextureCache textures,
         PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> trimesh)
@@ -615,8 +636,13 @@ public partial class LevelBuilder
             StaticMeshCollectionActor collection = ObjectBinary.From<StaticMeshCollectionActor>(actor);
             for (int i = 0; i < collection.Components.Count; i++)
             {
-                if (pcc.TryGetUExport(collection.Components[i], out ExportEntry component) && KeepsComponent(component))
-                    AddMeshInstance(pcc, actor, null, component, collection.LocalToWorldTransforms[i], packageNode, textures, trimesh);
+                if (!pcc.TryGetUExport(collection.Components[i], out ExportEntry component) || !KeepsComponent(component))
+                    continue;
+                // A collected component keeps its own transform (its original actor's scale is
+                // in its Scale3D), applied under the stored matrix, which holds no scale: LE3's
+                // Firebase White mirrors and scales 862 of its 1,085 components that way.
+                Matrix4x4 world = UnrealTransform.ComponentToActor(component.GetProperties()) * collection.LocalToWorldTransforms[i];
+                AddMeshInstance(pcc, actor, null, component, world, packageNode, textures, trimesh);
             }
             return;
         }

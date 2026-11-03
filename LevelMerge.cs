@@ -172,6 +172,10 @@ public partial class LevelBuilder
                 kind = MergeKind.None;
             if (extras["me_material"] is JsonObject translated)
             {
+                // Lit translucent materials (glass, decals, snow piles) export as opaque glTF
+                // materials but blend by their shader's opacity in game, so Godot sorts them per object.
+                if (translated["blend"]?.GetValue<string>() == "BLEND_Translucent")
+                    kind = MergeKind.None;
                 foreach (string policy in unlit ? new[] { "unlit" } : new[] { "texture", "vertex" })
                 {
                     if (translated[policy]?["code"]?.GetValue<string>() is string code && InstanceDependent.IsMatch(code))
