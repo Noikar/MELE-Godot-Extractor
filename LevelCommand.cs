@@ -88,6 +88,8 @@ public static class LevelCommand
     // "--streaming-extra <chunks>" (comma-separated) keeps those chunks too.
     // "--light-passes" exports the lights a level draws live over static shadow maps (LE3's MP
     // maps' sun and floodlights; see LevelBuilder.LightPasses).
+    // "--exclude <package> <actors>" (comma-separated, wildcards allowed; repeatable) leaves those
+    // actors of that package out entirely (Firebase White's Cerberus fighters flying overhead).
     // steps reports each package read, the build, and the save (and laterSteps more the caller
     // runs after it, such as the music) for the game's progress bar.
     public static int Run(string outPath, string[] args, EntrySteps steps = null, int laterSteps = 0)
@@ -106,6 +108,7 @@ public static class LevelCommand
         float mergeCell = LevelBuilder.DefaultMergeCell;
         (Vector3, Vector3)? collisionBounds = null;
         bool lightPasses = false;
+        Dictionary<string, string[]> excluded = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         string soundsDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
         for (int i = 0; i < args.Length; i++)
         {
@@ -137,6 +140,8 @@ public static class LevelCommand
                 borrowSources[^1] = borrowSources[^1] with { Clip = (ParseVector(args[++i]), ParseVector(args[++i])) };
             else if (args[i] == "--light-passes")
                 lightPasses = true;
+            else if (args[i] == "--exclude" && i + 2 < args.Length)
+                excluded[Path.GetFileNameWithoutExtension(args[++i])] = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             else
                 patterns.Add(args[i]);
         }
@@ -156,6 +161,7 @@ public static class LevelCommand
         LevelBuilder builder = new LevelBuilder(maxTexture, soundsDir)
         {
             MergeCell = mergeCell, CollisionBounds = collisionBounds, Steps = steps, LightPasses = lightPasses,
+            Excluded = excluded,
         };
         if (steps != null)
             steps.Total = files.Length + borrowSources.Count + 2 + laterSteps;
@@ -414,6 +420,9 @@ public partial class LevelBuilder
     // color, and cone. Off by default, so the levels that never needed it export as before.
     public bool LightPasses { get; set; }
 
+    // --exclude: actor name patterns left out, by package name (without its extension).
+    public Dictionary<string, string[]> Excluded { get; set; } = new Dictionary<string, string[]>();
+
     // While a borrow with a clip is read (--borrow-clip): the box in glTF space its meshes are
     // cut to (MeshGeometry.Clipped).
     private (Vector3 Min, Vector3 Max)? _clip;
@@ -505,12 +514,19 @@ public partial class LevelBuilder
         List<(ExportEntry Actor, ExportEntry Component)> decals = new List<(ExportEntry Actor, ExportEntry Component)>();
         List<string> borrowed = new List<string>();
         HashSet<string> matched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        string[] excludedHere = Excluded.TryGetValue(packageName, out string[] patterns) ? patterns : [];
+        int excludedCount = 0;
 
         Level level = ObjectBinary.From<Level>(levelExport);
         foreach (int actorIndex in level.Actors)
         {
             if (actorIndex == 0 || !pcc.TryGetUExport(actorIndex, out ExportEntry actor))
                 continue;
+            if (excludedHere.Any(p => FileSystemName.MatchesSimpleExpression(p, actor.ObjectName.Instanced, ignoreCase: true)))
+            {
+                excludedCount++;
+                continue;
+            }
             if (only != null)
             {
                 string actorName = actor.ObjectName.Instanced;
@@ -567,6 +583,8 @@ public partial class LevelBuilder
 
         Console.WriteLine($"{packageName}: {_instances - instancesBefore} mesh instances, {_lightCount - lightsBefore} lights, "
             + $"{_hullCount - hullsBefore} hulls, {_trimeshTriangles - trisBefore} collision triangles.");
+        if (excludedHere.Length > 0)
+            Console.WriteLine($"Excluded {excludedCount} actors from {packageName} ({string.Join(", ", excludedHere)}).");
         if (only != null)
         {
             Console.WriteLine($"Borrowed {borrowed.Count} actors from {packageName}: {string.Join(", ", borrowed)}");

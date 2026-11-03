@@ -24,6 +24,7 @@ public static class ShadersCommand
         string vertexFactory = "FLocalVertexFactory";
         string cachePackage = null;
         string pass = "TBasePassPixelShader";
+        bool types = false;
         List<string> patterns = new List<string>();
         for (int i = 0; i < args.Length; i++)
         {
@@ -35,6 +36,8 @@ public static class ShadersCommand
                 pass = args[++i];
             else if (args[i] == "--skinned")
                 vertexFactory = "FGPUSkinVertexFactory";
+            else if (args[i] == "--types")
+                types = true;
             else
                 patterns.Add(args[i]);
         }
@@ -51,6 +54,18 @@ public static class ShadersCommand
                 cache = ShaderAnalysis.CacheOfFile(Program.ResolvePackage(cachePackage));
             if (cache == null)
                 continue;
+            if (types)
+            {
+                // Which shader types (lightmap and sky light variants) the cache holds at all,
+                // with how many material shader maps carry each.
+                foreach (IGrouping<string, string> group in cache.MaterialShaderMaps.Values
+                    .SelectMany(m => m.MeshShaderMaps.Where(s => s.VertexFactoryType.Instanced == vertexFactory).SelectMany(s => s.Shaders.Select(kv => kv.Key.Instanced)))
+                    .Where(t => t.StartsWith(pass))
+                    .GroupBy(t => t)
+                    .OrderBy(g => g.Key, StringComparer.Ordinal))
+                    Console.WriteLine($"{group.Count(),5} {group.Key}");
+                continue;
+            }
             ILookup<string, ExportEntry> instances = InstancesByBase(pcc);
 
             foreach (ExportEntry material in pcc.Exports.Where(e => e.ClassName is "Material" or "DecalMaterial"))

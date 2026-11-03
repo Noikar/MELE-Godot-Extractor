@@ -13,7 +13,7 @@ public static class TextureCommand
     {
         using IMEPackage pcc = MEPackageHandler.OpenMEPackage(Program.ResolvePackage(package));
         Directory.CreateDirectory(outFolder);
-        foreach (ExportEntry e in pcc.Exports.Where(e => e.ClassName == "Texture2D"
+        foreach (ExportEntry e in pcc.Exports.Where(e => e.ClassName is "Texture2D" or "LightMapTexture2D" or "ShadowMapTexture2D"
             && e.InstancedFullPath.Contains(filter, StringComparison.OrdinalIgnoreCase)))
         {
             string path = Path.Combine(outFolder, e.ObjectName.Instanced + (dds ? ".dds" : ".png"));
@@ -26,7 +26,11 @@ public static class TextureCommand
                 ok = data != null;
                 if (ok)
                     File.WriteAllBytes(path, data);
-                note = $" ({new Texture2D(e).TextureFormat}{(ok ? "" : ": " + failure)})";
+                Texture2D texture = new Texture2D(e);
+                // Where each mip lives: in the package, or a texture cache file (TFC) beside it.
+                string mips = string.Join(", ", texture.Mips.Select(m => $"{m.width}x{m.height} {m.storageType}"
+                    + (m.IsPackageStored ? "" : $" in {m.TextureCacheName}")));
+                note = $" ({texture.TextureFormat}{(ok ? "" : ": " + failure)}; mips {mips})";
             }
             else
                 ok = new Texture2D(e).ExportToPNG(path);

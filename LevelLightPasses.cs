@@ -10,9 +10,12 @@ namespace LexExport;
 // Lights a level draws live instead of baking into its lightmaps (--light-passes; LE3's MP
 // maps: Firebase White's sun and floodlights, without which every surface they reach is black).
 //
-// UE3 bakes a static light's direct light into the lightmaps of the primitives it reaches (the
-// lightmap's LightGuids list it by its LightmapGuid). Any other light that reaches a lightmapped
-// primitive is drawn per frame, in an additive pass of its own over the base pass
+// UE3 bakes a static light's direct light into the lightmaps of the primitives it reaches only
+// when the light's UseDirectLightMap is set (the lightmap's LightGuids then list it by its
+// LightmapGuid). ME1's light actors set it; ME3's never do (UE3's class default is off), so
+// their lightmaps hold only bounced light, though they still list the lights it came from:
+// Firebase White's interiors are near black in them. Any light whose direct light isn't baked
+// and that reaches a lightmapped primitive is drawn per frame, in an additive pass of its own over the base pass
 // (TLightPixelShader<light policy, shadowing policy>): with a static shadow map where Lightmass
 // found something in its way (a ShadowMap2D on the component, named by the light's LightGuid:
 // FShadowTexturePolicy), and unshadowed where it found nothing (FNoStaticShadowingPolicy).
@@ -33,11 +36,12 @@ public partial class LevelBuilder
     // A light that can be drawn live: its GUIDs, the pass key's light kind, channels, and reach in
     // glTF space (meters; a directional light reaches everything).
     private sealed record LiveLight(string Guid, string LightmapGuid, string Kind, HashSet<string> Channels,
-        Vector3 Position, float Radius, Vector3 Direction, float CosOuter);
+        Vector3 Position, float Radius, Vector3 Direction, float CosOuter, bool DirectLightMap);
 
     // A lightmapped instance's node, and what decides which lights it draws live.
+    // Baked: the lights its lightmap lists; Irrelevant: the ones Lightmass found entirely blocked.
     private sealed record LitInstance(NodeBuilder Node, HashSet<string> Channels, Vector3 Center, float Radius,
-        HashSet<string> Skip, Dictionary<string, JsonObject> ShadowMaps, HashSet<string> VertexShadowed);
+        HashSet<string> Baked, HashSet<string> Irrelevant, Dictionary<string, JsonObject> ShadowMaps, HashSet<string> VertexShadowed);
 
     private readonly List<LiveLight> _liveLights = new();
     private readonly List<LitInstance> _litInstances = new();
@@ -61,9 +65,12 @@ public partial class LevelBuilder
             return;
         // A spot's cone, for the reach test: where it shines (glTF axes) and its outer angle.
         float outer = Math.Clamp(props.GetProp<FloatProperty>("OuterConeAngle")?.Value ?? 44f, 0.001f, 89f) * MathF.PI / 180f;
+        // Whether its direct light is in the lightmaps: the light's own flag or its archetype's,
+        // else UE3's class default (off).
+        bool directLightMap = InheritedProp<BoolProperty>(component, "UseDirectLightMap")?.Value ?? false;
         _liveLights.Add(new LiveLight(guid, GuidText(props.GetProp<StructProperty>("LightmapGuid")), kind,
             ChannelSet(component, LightDefaultChannels), position, radius * UnrealSpace.UnitsToMeters,
-            forward, MathF.Cos(outer)));
+            forward, MathF.Cos(outer), directLightMap));
     }
 
     // A lightmapped instance, with what decides its live lights: its channels, bounds, the lights
@@ -72,14 +79,15 @@ public partial class LevelBuilder
         Matrix4x4 world, LightMap lightMap)
     {
         BoxSphereBounds bounds = geometry.Bounds.TransformBy(world);
-        HashSet<string> skip = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (Guid baked in LightGuidsOf(lightMap))
-            skip.Add(GuidText(baked));
+        HashSet<string> baked = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (Guid listed in LightGuidsOf(lightMap))
+            baked.Add(GuidText(listed));
+        HashSet<string> irrelevantLights = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         PropertyCollection props = component.GetProperties();
         foreach (StructProperty irrelevant in props.GetProp<ArrayProperty<StructProperty>>("IrrelevantLights") ?? Enumerable.Empty<StructProperty>())
         {
             if (GuidText(irrelevant) is string guid)
-                skip.Add(guid);
+                irrelevantLights.Add(guid);
         }
 
         Dictionary<string, JsonObject> shadowMaps = new Dictionary<string, JsonObject>(StringComparer.OrdinalIgnoreCase);
@@ -131,7 +139,7 @@ public partial class LevelBuilder
             }
         }
         _litInstances.Add(new LitInstance(node, PrimitiveChannels(component, staticLighting: true).Select(c => c.GetValue<string>()).ToHashSet(),
-            UnrealSpace.Position(bounds.Origin), bounds.SphereRadius * UnrealSpace.UnitsToMeters, skip, shadowMaps, vertexShadowed));
+            UnrealSpace.Position(bounds.Origin), bounds.SphereRadius * UnrealSpace.UnitsToMeters, baked, irrelevantLights, shadowMaps, vertexShadowed));
     }
 
     private static IEnumerable<Guid> LightGuidsOf(LightMap lightMap) => lightMap switch
@@ -152,13 +160,16 @@ public partial class LevelBuilder
             bool traced = !string.IsNullOrEmpty(trace) && instance.Node.Name.Contains(trace, StringComparison.OrdinalIgnoreCase);
             if (traced)
                 Console.WriteLine($"  trace {instance.Node.Name}: channels {string.Join(",", instance.Channels)}, center {instance.Center}, "
-                    + $"radius {instance.Radius:0.0} m, skip {string.Join(",", instance.Skip)}, shadow maps {string.Join(",", instance.ShadowMaps.Keys)}");
+                    + $"radius {instance.Radius:0.0} m, baked {string.Join(",", instance.Baked)}, irrelevant {string.Join(",", instance.Irrelevant)}, "
+                    + $"shadow maps {string.Join(",", instance.ShadowMaps.Keys)}");
             foreach (LiveLight light in _liveLights)
             {
+                bool listed = instance.Baked.Contains(light.Guid) || (light.LightmapGuid != null && instance.Baked.Contains(light.LightmapGuid));
+                bool baked = listed && light.DirectLightMap;
                 if (traced)
-                    Console.WriteLine($"    {light.Kind} {light.Guid}: skipped {instance.Skip.Contains(light.Guid)}/{(light.LightmapGuid != null && instance.Skip.Contains(light.LightmapGuid))}, "
+                    Console.WriteLine($"    {light.Kind} {light.Guid}: listed {listed}, direct light map {light.DirectLightMap}, irrelevant {instance.Irrelevant.Contains(light.Guid)}, "
                         + $"channels {string.Join(",", light.Channels)} overlap {light.Channels.Overlaps(instance.Channels)}, reaches {Reaches(light, instance)}");
-                if (instance.Skip.Contains(light.Guid) || (light.LightmapGuid != null && instance.Skip.Contains(light.LightmapGuid))
+                if (baked || instance.Irrelevant.Contains(light.Guid)
                     || !light.Channels.Overlaps(instance.Channels) || !Reaches(light, instance))
                     continue;
                 if (instance.ShadowMaps.TryGetValue(light.Guid, out JsonObject shadowed))

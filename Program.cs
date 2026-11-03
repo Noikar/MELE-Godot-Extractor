@@ -113,6 +113,7 @@ public static class Program
                 "streambank" when args.Length >= 3 => StreamBankCommand.Run(args[1], args[2], args.Contains("--raw")),
                 "reflect" when args.Length >= 2 => ReflectCommand.Run(args[1]),
                 "decals" when args.Length >= 2 => DecalsCommand.Run(args[1]),
+                "lightmaps" when args.Length >= 3 => LightmapsCommand.Run(args[1], args[2], args.Length >= 4 ? int.Parse(args[3]) : 20),
                 "refs" when args.Length >= 3 => RefsCommand.Run(args[1], args[2]),
                 "script" when args.Length >= 3 => ScriptCommand.Run(args[1], args[2..]),
                 "wwise" when args.Length >= 3 => WwiseExport.Describe(ResolvePackage(args[1]), args[2]),

@@ -234,6 +234,12 @@ public static class ManifestCommand
             .Select(v => v.GetDouble().ToString(System.Globalization.CultureInfo.InvariantCulture)));
         if (entry.TryGetProperty("collision_bounds", out JsonElement bounds))
             args.AddRange(["--collision-bounds", Corner(bounds, "min"), Corner(bounds, "max")]);
+        // Actors left out: [{ "package": ..., "actors": "<comma-separated names, wildcards allowed>" }].
+        if (entry.TryGetProperty("exclude", out JsonElement exclude))
+        {
+            foreach (JsonElement source in exclude.EnumerateArray())
+                args.AddRange(["--exclude", source.GetProperty("package").GetString(), source.GetProperty("actors").GetString()]);
+        }
         // Actors borrowed from other packages: [{ "package": ..., "actors": "<comma-separated names>" }],
         // each optionally cut to a box ("clip": { "min": [x, y, z], "max": [x, y, z] } in glTF space).
         if (entry.TryGetProperty("borrow", out JsonElement borrow))
