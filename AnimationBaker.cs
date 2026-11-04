@@ -74,7 +74,7 @@ public static class AnimationBaker
                 if (inPlace && b == rootBone)
                     pos = new Vector3(firstPos.X, firstPos.Y, pos.Z);
                 positions[f] = useTranslation ? UnrealSpace.Position(pos) : bind.Translation;
-                rotations[f] = holdBind ? bind.Rotation : UnrealSpace.Rotation(FromPsa(keys.Rotation(psa, info, b, f)));
+                rotations[f] = holdBind ? bind.Rotation : UnrealSpace.Rotation(FromPsa(keys.Rotation(psa, info, b, f), b == rootBone));
                 if (added)
                 {
                     rotations[f] = Quaternion.Normalize(delta.Rotation * rotations[f]);
@@ -259,7 +259,7 @@ public static class AnimationBaker
                 continue;
             MergedSkeleton.Bone bone = skeleton.Bones[skeleton.IndexOf(name)];
             PSA.PSAAnimKeys key = psa.Keys[psa.Infos[0].FirstRawFrame * psa.Bones.Count + b];
-            angles.Add(AngleBetween(bone.Rotation, UnrealSpace.Rotation(FromPsa(key.Rotation))));
+            angles.Add(AngleBetween(bone.Rotation, UnrealSpace.Rotation(FromPsa(key.Rotation, bone.Parent < 0))));
             gaps.Add(Vector3.Distance(bone.Translation, UnrealSpace.Position(FromPsa(key.Position))) * 100);
         }
         static double Median(List<double> v) => v.OrderBy(x => x).ElementAt(v.Count / 2);
@@ -270,9 +270,15 @@ public static class AnimationBaker
     // LEX's PSA keys are mirrored across the XZ plane relative to the RefSkeleton (the ActorX
     // convention): translations have Y negated, and rotations come out as (x, -y, z, w).
     // Verified against the bind pose with --check (107/109 bones within 5°, median 0°).
+    // The root bone's rotation comes out inverted relative to its children's (ActorX treats
+    // the root apart), so it's conjugated back. Character roots are identity and the pistols'
+    // a 180° turn (its own inverse), which hid this until the geth rifle, whose root is a
+    // 120° turn: its Expand clip pointed the gun sideways.
     private static Vector3 FromPsa(Vector3 position) => new Vector3(position.X, -position.Y, position.Z);
 
-    private static Quaternion FromPsa(Quaternion rotation) => new Quaternion(rotation.X, -rotation.Y, rotation.Z, rotation.W);
+    private static Quaternion FromPsa(Quaternion rotation, bool isRoot = false) => isRoot
+        ? new Quaternion(-rotation.X, rotation.Y, -rotation.Z, rotation.W)
+        : new Quaternion(rotation.X, -rotation.Y, rotation.Z, rotation.W);
 
     private static double AngleBetween(Quaternion a, Quaternion b)
     {

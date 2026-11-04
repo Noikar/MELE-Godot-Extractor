@@ -872,6 +872,10 @@ public partial class LevelBuilder
     // Path points by key (NavKey), in glTF space, and each one's links (the keys it reaches).
     private readonly Dictionary<string, Vector3> _navPoints = new();
     private readonly Dictionary<string, HashSet<string>> _navLinks = new();
+    // Each point's class (PathNode, CoverSlotMarker, SFXEnemySpawnPoint, ...), and the links
+    // walked on foot: plain ReachSpecs (the others mantle, slip along cover, boost, or climb).
+    private readonly Dictionary<string, string> _navKinds = new();
+    private readonly HashSet<(string From, string To)> _walkLinks = new();
     private readonly List<(JsonObject Walk, string Name, List<string> Keys)> _pendingWalks = new();
     private readonly List<string> _walkerRoutes = new();
 
@@ -900,6 +904,7 @@ public partial class LevelBuilder
             {
                 keys[point.UIndex] = key = NavKey(pcc, point);
                 _navPoints[key] = UnrealSpace.Position(UnrealTransform.ActorToWorld(point.GetProperties()).Translation);
+                _navKinds[key] = point.ClassName;
             }
             return key;
         }
@@ -919,8 +924,57 @@ public partial class LevelBuilder
             if (!_navLinks.TryGetValue(startKey, out HashSet<string> links))
                 _navLinks[startKey] = links = new HashSet<string>();
             links.Add(endKey);
+            if (spec.ClassName == "ReachSpec")
+                _walkLinks.Add((startKey, endKey));
         }
     }
+
+    // Paths/ (--paths): the walkable network for the server's NPCs, as extras "me_paths" on an
+    // empty node, in glTF space: "points" ([x, y, z] each, at the point's middle, as UE3 places
+    // NavigationPoints: about a pawn's half height above the floor), "kinds" (each point's
+    // class), "links" ([from, to] point indices; a ReachSpec is one-way, so a two-way path is two
+    // links), and "spawns" (the indices of the SFXEnemySpawnPoints, ME3's enemy spawns).
+    private int _pathPoints, _pathLinks, _pathSpawns;
+
+    private void WritePaths()
+    {
+        Dictionary<string, int> index = new Dictionary<string, int>();
+        JsonArray points = new JsonArray();
+        JsonArray kinds = new JsonArray();
+        JsonArray spawns = new JsonArray();
+        int IndexOf(string key)
+        {
+            if (index.TryGetValue(key, out int i))
+                return i;
+            Vector3 at = _navPoints[key];
+            index[key] = i = points.Count;
+            points.Add(new JsonArray(at.X, at.Y, at.Z));
+            string kind = _navKinds.TryGetValue(key, out string k) ? k : "NavigationPoint";
+            kinds.Add(kind);
+            if (kind == "SFXEnemySpawnPoint")
+                spawns.Add(i);
+            return i;
+        }
+        JsonArray links = new JsonArray();
+        foreach ((string from, string to) in _walkLinks.OrderBy(l => l.From, StringComparer.Ordinal).ThenBy(l => l.To, StringComparer.Ordinal))
+        {
+            // A link into a sublevel that wasn't exported has no point to reach.
+            if (!_navPoints.ContainsKey(from) || !_navPoints.ContainsKey(to))
+                continue;
+            links.Add(new JsonArray(IndexOf(from), IndexOf(to)));
+        }
+        _pathPoints = points.Count;
+        _pathLinks = links.Count;
+        _pathSpawns = spawns.Count;
+        _root.CreateNode("Paths").Extras = new JsonObject
+        {
+            ["me_paths"] = new JsonObject { ["points"] = points, ["kinds"] = kinds, ["links"] = links, ["spawns"] = spawns },
+        };
+    }
+
+    private string PathSummary() =>
+        $"Paths: {_pathPoints} points, {_pathLinks} walkable links, {_pathSpawns} enemy spawn points "
+        + $"(of {_navPoints.Count} points and {_navLinks.Sum(l => l.Value.Count)} links of every kind).";
 
     // Gives each walker leg without a ReachSpec of its own the network's shortest route.
     private void RouteWalkers()

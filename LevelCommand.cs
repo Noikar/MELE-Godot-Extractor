@@ -88,6 +88,8 @@ public static class LevelCommand
     // "--streaming-extra <chunks>" (comma-separated) keeps those chunks too.
     // "--light-passes" exports the lights a level draws live over static shadow maps (LE3's MP
     // maps' sun and floodlights; see LevelBuilder.LightPasses).
+    // "--paths" writes the level's walkable path network and enemy spawn points under Paths/
+    // (LevelPawns.cs, WritePaths), which the server's NPCs walk.
     // "--exclude <package> <actors>" (comma-separated, wildcards allowed; repeatable) leaves those
     // actors of that package out entirely (Firebase White's Cerberus fighters flying overhead), or
     // with "<actor>.<component>" one component of a collection actor (the fighter on its helipad).
@@ -109,6 +111,7 @@ public static class LevelCommand
         float mergeCell = LevelBuilder.DefaultMergeCell;
         (Vector3, Vector3)? collisionBounds = null;
         bool lightPasses = false;
+        bool paths = false;
         Dictionary<string, string[]> excluded = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase);
         string soundsDir = Path.GetDirectoryName(Path.GetFullPath(outPath))!;
         for (int i = 0; i < args.Length; i++)
@@ -141,6 +144,8 @@ public static class LevelCommand
                 borrowSources[^1] = borrowSources[^1] with { Clip = (ParseVector(args[++i]), ParseVector(args[++i])) };
             else if (args[i] == "--light-passes")
                 lightPasses = true;
+            else if (args[i] == "--paths")
+                paths = true;
             else if (args[i] == "--exclude" && i + 2 < args.Length)
                 excluded[Path.GetFileNameWithoutExtension(args[++i])] = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             else
@@ -162,7 +167,7 @@ public static class LevelCommand
         LevelBuilder builder = new LevelBuilder(maxTexture, soundsDir)
         {
             MergeCell = mergeCell, CollisionBounds = collisionBounds, Steps = steps, LightPasses = lightPasses,
-            Excluded = excluded,
+            Excluded = excluded, Paths = paths,
         };
         if (steps != null)
             steps.Total = files.Length + borrowSources.Count + 2 + laterSteps;
@@ -421,6 +426,9 @@ public partial class LevelBuilder
     // color, and cone. Off by default, so the levels that never needed it export as before.
     public bool LightPasses { get; set; }
 
+    // Write the path network and spawn points under Paths/ (WritePaths).
+    public bool Paths { get; set; }
+
     // --exclude: actor name patterns left out, by package name (without its extension).
     public Dictionary<string, string[]> Excluded { get; set; } = new Dictionary<string, string[]>();
 
@@ -472,8 +480,8 @@ public partial class LevelBuilder
         try
         {
             AddPackageActors(pcc, only);
-            // The path network walkers route through (LevelPawns.cs, AddPathNetwork).
-            if (_pawnsNode != null && only == null)
+            // The path network walkers route through and NPCs walk (LevelPawns.cs, AddPathNetwork).
+            if ((_pawnsNode != null || Paths) && only == null)
                 AddPathNetwork(pcc);
         }
         finally
@@ -2172,6 +2180,8 @@ public partial class LevelBuilder
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
         // Every package's path network is in: route the walkers' legs ME1 can't walk straight.
         RouteWalkers();
+        if (Paths)
+            WritePaths();
         // Every light is in: which ones each lightmapped instance draws live (LevelLightPasses.cs).
         if (LightPasses)
             AssignLightPasses();
@@ -2218,6 +2228,8 @@ public partial class LevelBuilder
             foreach (string route in _walkerRoutes)
                 Console.WriteLine("  " + route);
         }
+        if (Paths)
+            Console.WriteLine(PathSummary());
         if (_skipped.Count > 0)
             Console.WriteLine("Skipped: " + string.Join(", ", _skipped.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}")));
         if (DroppedSections.Count > 0)
