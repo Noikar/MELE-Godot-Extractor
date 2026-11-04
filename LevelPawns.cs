@@ -969,6 +969,8 @@ public partial class LevelBuilder
         _root.CreateNode("Paths").Extras = new JsonObject
         {
             ["me_paths"] = new JsonObject { ["points"] = points, ["kinds"] = kinds, ["links"] = links, ["spawns"] = spawns },
+            // The level's cover slots (LevelCover.cs), their markers by the path indices above.
+            ["me_cover"] = WriteCover(index),
         };
     }
 

@@ -483,6 +483,9 @@ public partial class LevelBuilder
             // The path network walkers route through and NPCs walk (LevelPawns.cs, AddPathNetwork).
             if ((_pawnsNode != null || Paths) && only == null)
                 AddPathNetwork(pcc);
+            // Its cover slots, written beside the paths (LevelCover.cs).
+            if (Paths && only == null)
+                AddCover(pcc);
         }
         finally
         {
@@ -2229,7 +2232,10 @@ public partial class LevelBuilder
                 Console.WriteLine("  " + route);
         }
         if (Paths)
+        {
             Console.WriteLine(PathSummary());
+            Console.WriteLine(CoverSummary());
+        }
         if (_skipped.Count > 0)
             Console.WriteLine("Skipped: " + string.Join(", ", _skipped.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}")));
         if (DroppedSections.Count > 0)
