@@ -81,7 +81,7 @@ that zip from the release tag named by `LegendaryExplorerCore.dll`'s file versio
 ## Manifests
 
 A manifest is a list of entries for `manifest` to export. `characters.json`, `weapons.json`,
-`levels.json`, `powers.json`, and `props.json` are Mass Effect Zero's own, kept as working examples:
+`levels.json`, `powers.json`, `props.json`, and `glyphs.json` are Mass Effect Zero's own, kept as working examples:
 
 - **Character and weapon entries** name a `package`, an `out` path, and the `args` passed to
   `mesh` (meshes, `--mat`, `--morph`, `--override`, `--anim <AnimSequence>=<Clip>[@other.pcc]`, ...).
@@ -96,6 +96,8 @@ A manifest is a list of entries for `manifest` to export. `characters.json`, `we
   in its own frame with its materials baked from their compiled shaders (emissive on its own
   texture) and its simplified collision. An optional `screen` lays a quad over the prop's screen
   per state (`corners`, and per state a hologram `texture` from the same package and a `tint`).
+- **Glyph entries** name a `package` and its `glyphs`, `{ <id>: <Texture2D path> }`, each written
+  as `<id>.png` at its stored size. `tint` is for the game (whether it recolors the icon).
 
 ```
 LexExport manifest characters.json "<game root>" "<out folder>" [--only <id>,...] [--lanes <n>] [--background]

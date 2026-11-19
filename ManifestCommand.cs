@@ -7,7 +7,8 @@ namespace LexExport;
 
 // Exports every entry of a manifest: characters.json (character models), weapons.json (weapon
 // models), levels.json (levels and their music), powers.json (powers' sounds and effects),
-// canon.json (the games' own conversation lines, text and voice), or props.json (static props).
+// canon.json (the games' own conversation lines, text and voice), props.json (static props), or
+// glyphs.json (the games' controller and mouse button icons, for the HUD).
 // Each is the one list behind both the developer scripts (Tools/export_characters.ps1,
 // Tools/export_levels.ps1) and the game's first-run extractor (players), so a new model or
 // level goes into its manifest and nowhere else.
@@ -21,6 +22,7 @@ namespace LexExport;
 //                  <out>/<id>/vfx.glb               (PowerVfx, the entry's "vfx")
 //   canon       -> <out>/<id>.canon, <out>/<id>/    (CanonExport: a conversation's lines and voices)
 //   props       -> <out>/<entry.out>               (LevelBuilder.ExportProp, the entry's mesh)
+//   glyphs      -> <out>/<glyph id>.png            (each of the entry's Texture2Ds, as stored)
 //   <level>.looks.json -> <out>/<id>.glb            (LevelBuilder.ExportLook, one NPC look;
 //                                                   one already there is skipped, since its
 //                                                   id is a hash of everything it's made of)
@@ -56,8 +58,9 @@ public static class ManifestCommand
         bool powers = root.TryGetProperty("powers", out JsonElement powerList);
         bool canon = root.TryGetProperty("canon", out JsonElement canonList);
         bool props = root.TryGetProperty("props", out JsonElement propList);
+        bool glyphs = root.TryGetProperty("glyphs", out JsonElement glyphList);
         JsonElement list = levels ? levelList : weapons ? weaponList : looks ? lookList : powers ? powerList : canon ? canonList
-            : props ? propList : root.GetProperty("characters");
+            : props ? propList : glyphs ? glyphList : root.GetProperty("characters");
         JsonElement[] entries = list.EnumerateArray()
             .Where(e => only == null || only.Contains(e.GetProperty("id").GetString()))
             .ToArray();
@@ -76,7 +79,7 @@ public static class ManifestCommand
             string id = entry.GetProperty("id").GetString();
             // "<species>: <label>" for characters ("turian: Presidium visitor"), the label otherwise.
             string label = entry.GetProperty("label").GetString();
-            string name = levels || weapons || looks || powers || canon || props ? label : $"{entry.GetProperty("species").GetString()}: {label}";
+            string name = levels || weapons || looks || powers || canon || props || glyphs ? label : $"{entry.GetProperty("species").GetString()}: {label}";
             log.Direct($"PROGRESS {Interlocked.Increment(ref started)}/{entries.Length} {name}\n");
 
             string result;
@@ -97,6 +100,8 @@ public static class ManifestCommand
                         LevelBuilder.ExportProp(entry.GetProperty("package").GetString(), entry.GetProperty("mesh").GetString(),
                             Path.Combine(outDir, entry.GetProperty("out").GetString()),
                             entry.TryGetProperty("screen", out JsonElement screen) ? screen : default);
+                    else if (glyphs)
+                        ExportGlyphs(entry, outDir);
                     else
                         ExportModel(entry, outDir);
                     result = $"OK {id}";
@@ -175,6 +180,31 @@ public static class ManifestCommand
             File.WriteAllText(temporary, sounds.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
         if (entry.TryGetProperty("vfx", out JsonElement vfx))
             LevelBuilder.ExportPowerVfx(package, vfx, Path.Combine(folder, "vfx.glb"));
+    }
+
+    // A set of button glyphs from one package: each of the entry's "glyphs" ({ <id>: <Texture2D
+    // path> }) as <out>/<id>.png, at its stored size. The entry's "tint" is the game's business
+    // (it reads the manifest), not the exporter's.
+    private static void ExportGlyphs(JsonElement entry, string outDir)
+    {
+        string package = Program.ResolvePackage(entry.GetProperty("package").GetString());
+        if (!File.Exists(package))
+            throw new FileNotFoundException($"{Path.GetFileName(package)} is missing from the install.");
+        using LegendaryExplorerCore.Packages.IMEPackage pcc = LegendaryExplorerCore.Packages.MEPackageHandler.OpenMEPackage(package);
+        Directory.CreateDirectory(outDir);
+        foreach (JsonProperty glyph in entry.GetProperty("glyphs").EnumerateObject())
+        {
+            string path = glyph.Value.GetString();
+            LegendaryExplorerCore.Packages.ExportEntry export = pcc.Exports.FirstOrDefault(e => e.ClassName == "Texture2D"
+                && e.InstancedFullPath.Equals(path, StringComparison.OrdinalIgnoreCase))
+                ?? throw new InvalidOperationException($"{path} isn't in {Path.GetFileName(package)}.");
+            LegendaryExplorerCore.Unreal.Classes.Texture2D texture = new LegendaryExplorerCore.Unreal.Classes.Texture2D(export);
+            bool written = false;
+            OutputFiles.Write(Path.Combine(outDir, glyph.Name + ".png"), temporary => written = texture.ExportToPNG(temporary));
+            if (!written)
+                throw new InvalidOperationException($"{path} didn't export.");
+            Console.WriteLine($"{glyph.Name}: {path}");
+        }
     }
 
     // An NPC look, unless an earlier run (or another level's) already baked it.

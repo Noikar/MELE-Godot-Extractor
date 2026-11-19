@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "glyphs": [
+    {
+      "id": "le3_xbox_face",
+      "label": "Xbox face buttons (ME3)",
+      "note": "LE3's Xbox face buttons, drawn as the game draws them (red pads, yellow letters on colored rounds), untinted.",
+      "package": "ME3/Startup.pcc",
+      "tint": false,
+      "glyphs": {
+        "xbox_a": "BIOA_ControllerIcons_XBOX.xbox_A",
+        "xbox_b": "BIOA_ControllerIcons_XBOX.xbox_B",
+        "xbox_x": "BIOA_ControllerIcons_XBOX.xbox_X",
+        "xbox_y": "BIOA_ControllerIcons_XBOX.xbox_Y"
+      }
+    },
+    {
+      "id": "le3_mouse",
+      "label": "Mouse buttons (ME3)",
+      "note": "LE3's PC mouse icons, tinted to the theme.",
+      "package": "ME3/Startup.pcc",
+      "tint": true,
+      "glyphs": {
+        "mouse_left": "BIOA_ControllerIcons_PC.mouse_left",
+        "mouse_mid": "BIOA_ControllerIcons_PC.mouse_mid",
+        "mouse_right": "BIOA_ControllerIcons_PC.mouse_right"
+      }
+    },
+    {
+      "id": "le1_xbox",
+      "label": "Xbox buttons (ME1)",
+      "note": "LE1's anonymous Xbox icons (near-white, dark outline), tinted to the theme. The ids were matched by eye on the exported sheet; a D-pad arm's icon is the cross with that arm hollow.",
+      "package": "ME1/Startup_INT.pcc",
+      "tint": true,
+      "glyphs": {
+        "xbox_lb": "GUI_SF_SharedAssets.XBox_ControllerIcons_I21",
+        "xbox_rb": "GUI_SF_SharedAssets.XBox_ControllerIcons_I24",
+        "xbox_lt": "GUI_SF_SharedAssets.XBox_ControllerIcons_I27",
+        "xbox_rt": "GUI_SF_SharedAssets.XBox_ControllerIcons_I2A",
+        "xbox_dpad": "GUI_SF_SharedAssets.XBox_ControllerIcons_I3C",
+        "xbox_dpad_up": "GUI_SF_SharedAssets.XBox_ControllerIcons_I3F",
+        "xbox_dpad_down": "GUI_SF_SharedAssets.XBox_ControllerIcons_I33",
+        "xbox_dpad_left": "GUI_SF_SharedAssets.XBox_ControllerIcons_I39",
+        "xbox_dpad_right": "GUI_SF_SharedAssets.XBox_ControllerIcons_I36",
+        "xbox_start": "GUI_SF_SharedAssets.XBox_ControllerIcons_I42",
+        "xbox_back": "GUI_SF_SharedAssets.XBox_ControllerIcons_I45"
+      }
+    },
+    {
+      "id": "le1_ps_face",
+      "label": "PlayStation face buttons (ME1)",
+      "note": "LE1's PlayStation face buttons (LE3 has none), drawn as the game draws them, untinted.",
+      "package": "ME1/Startup_INT.pcc",
+      "tint": false,
+      "glyphs": {
+        "ps_cross": "GUI_SF_SharedAssets.PS3_ControllerIcons_I1",
+        "ps_circle": "GUI_SF_SharedAssets.PS3_ControllerIcons_I4",
+        "ps_square": "GUI_SF_SharedAssets.PS3_ControllerIcons_I3C",
+        "ps_triangle": "GUI_SF_SharedAssets.PS3_ControllerIcons_I39"
+      }
+    },
+    {
+      "id": "le1_ps",
+      "label": "PlayStation buttons (ME1)",
+      "note": "LE1's anonymous PlayStation icons (PS4-era: Options, touchpad), tinted to the theme. A D-pad arm's icon is the cross with an arrow by that arm.",
+      "package": "ME1/Startup_INT.pcc",
+      "tint": true,
+      "glyphs": {
+        "ps_l1": "GUI_SF_SharedAssets.PS3_ControllerIcons_I1B",
+        "ps_r1": "GUI_SF_SharedAssets.PS3_ControllerIcons_I21",
+        "ps_l2": "GUI_SF_SharedAssets.PS3_ControllerIcons_I18",
+        "ps_r2": "GUI_SF_SharedAssets.PS3_ControllerIcons_I1E",
+        "ps_dpad": "GUI_SF_SharedAssets.PS3_ControllerIcons_I15",
+        "ps_dpad_up": "GUI_SF_SharedAssets.PS3_ControllerIcons_I30",
+        "ps_dpad_down": "GUI_SF_SharedAssets.PS3_ControllerIcons_I45",
+        "ps_dpad_left": "GUI_SF_SharedAssets.PS3_ControllerIcons_I36",
+        "ps_dpad_right": "GUI_SF_SharedAssets.PS3_ControllerIcons_I33",
+        "ps_options": "GUI_SF_SharedAssets.PS3_ControllerIcons_I3F",
+        "ps_touchpad": "GUI_SF_SharedAssets.PS3_ControllerIcons_I42"
+      }
+    }
+  ]
+}
