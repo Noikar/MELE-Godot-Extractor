@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Linq.Expressions;
 using System.Numerics;
+using System.Runtime.Intrinsics;
 using System.Text.RegularExpressions;
 using LegendaryExplorerCore.Packages;
 using LegendaryExplorerCore.Unreal;
@@ -30,7 +31,7 @@ namespace LexExport;
 // the camera's cosine, so three runs solve for the color and the power, whatever math or
 // textures the material computes them from. The specular map holds the color in RGB (sRGB,
 // divided by SpecularScale when it passes 1) and the power in alpha as log2(power) / 8.
-public static class ShaderBaker
+public static partial class ShaderBaker
 {
     public record Result(MemoryImage Albedo, MemoryImage? Normal, MemoryImage? Emissive, MemoryImage? Specular,
         float SpecularScale, bool Cutout, string Note);
@@ -213,32 +214,61 @@ public static class ShaderBaker
         bool cutout = false, hasNormal = program.Writes(2), hasEmissive = false;
         CompiledShader compiled = new CompiledShader(program, constants, slots);
         CompiledShader lightCompiled = lightProgram != null ? new CompiledShader(lightProgram, lightConstants, slots, lit: true) : null;
-        Parallel.For(0, height, ParallelLimits.Options, y =>
+        // One texel's results into the maps.
+        void Store(int x, int y, bool discarded, Vector4 emit, Vector4 lit, Vector4 viewNormal)
         {
-            Machine machine = new Machine(compiled, constants);
-            for (int x = 0; x < width; x++)
+            Vector3 diffuse = lit.AsVector3() - emit.AsVector3();
+            int i = y * width + x;
+            albedo[i] = new Rgba32(MaterialBaker.Srgb(diffuse.X), MaterialBaker.Srgb(diffuse.Y), MaterialBaker.Srgb(diffuse.Z), discarded ? 0f : 1f);
+            if (discarded)
+                cutout = true;
+            Vector3 glow = Vector3.Max(emit.AsVector3(), Vector3.Zero);
+            if (glow.X + glow.Y + glow.Z > 0.01f)
+                hasEmissive = true;
+            emissive[i] = new Rgba32(MaterialBaker.Srgb(glow.X), MaterialBaker.Srgb(glow.Y), MaterialBaker.Srgb(glow.Z), 1f);
+            if (hasNormal)
             {
-                Vector2 uv = new Vector2((x + 0.5f) / width, (y + 0.5f) / height);
-                bool discarded = !machine.Run(uv, out Vector4 emit, out Vector4 lit, out Vector4 viewNormal);
-                Vector3 diffuse = lit.AsVector3() - emit.AsVector3();
-                int i = y * width + x;
-                albedo[i] = new Rgba32(MaterialBaker.Srgb(diffuse.X), MaterialBaker.Srgb(diffuse.Y), MaterialBaker.Srgb(diffuse.Z), discarded ? 0f : 1f);
-                if (discarded)
-                    cutout = true;
-                Vector3 glow = Vector3.Max(emit.AsVector3(), Vector3.Zero);
-                if (glow.X + glow.Y + glow.Z > 0.01f)
-                    hasEmissive = true;
-                emissive[i] = new Rgba32(MaterialBaker.Srgb(glow.X), MaterialBaker.Srgb(glow.Y), MaterialBaker.Srgb(glow.Z), 1f);
-                if (hasNormal)
-                {
-                    // o2.xy is the normal packed to 0..1; rebuild Z and flip green from
-                    // DirectX's convention to glTF's.
-                    float nx = viewNormal.X * 2f - 1f, ny = viewNormal.Y * 2f - 1f;
-                    float nz = MathF.Sqrt(MathF.Max(0f, 1f - nx * nx - ny * ny));
-                    normal[i] = new Rgba32(nx * 0.5f + 0.5f, 0.5f - ny * 0.5f, nz * 0.5f + 0.5f, 1f);
-                }
+                // o2.xy is the normal packed to 0..1; rebuild Z and flip green from
+                // DirectX's convention to glTF's.
+                float nx = viewNormal.X * 2f - 1f, ny = viewNormal.Y * 2f - 1f;
+                float nz = MathF.Sqrt(MathF.Max(0f, 1f - nx * nx - ny * ny));
+                normal[i] = new Rgba32(nx * 0.5f + 0.5f, 0.5f - ny * 0.5f, nz * 0.5f + 0.5f, 1f);
             }
-        });
+        }
+
+        if (compiled.Wide != null)
+        {
+            Parallel.For(0, height, ParallelLimits.Options, () => new WideMachine(compiled), (y, _, machine) =>
+            {
+                // The lit color is the last run's (ambient 1), the emissive the first's.
+                int lit = machine.Runs - 1;
+                Span<float> u = stackalloc float[Lanes];
+                for (int x0 = 0; x0 < width; x0 += Lanes)
+                {
+                    // Lanes past the edge repeat its last texel and are dropped.
+                    for (int lane = 0; lane < Lanes; lane++)
+                        u[lane] = (Math.Min(x0 + lane, width - 1) + 0.5f) / width;
+                    machine.SetUv(Vector256.Create<float>(u), Vector256.Create((y + 0.5f) / height));
+                    machine.Run();
+                    for (int lane = 0; lane < Lanes && x0 + lane < width; lane++)
+                        Store(x0 + lane, y, !machine.Kept(lane), machine.Color(0, lane), machine.Color(lit, lane), machine.Normal(lit, lane));
+                }
+                return machine;
+            }, _ => { });
+        }
+        else
+        {
+            Parallel.For(0, height, ParallelLimits.Options, () => new Machine(compiled, constants), (y, _, machine) =>
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    Vector2 uv = new Vector2((x + 0.5f) / width, (y + 0.5f) / height);
+                    bool discarded = !machine.Run(uv, out Vector4 emit, out Vector4 lit, out Vector4 viewNormal);
+                    Store(x, y, discarded, emit, lit, viewNormal);
+                }
+                return machine;
+            }, _ => { });
+        }
 
         // The specular, in a pass of its own at up to MaxSpecularSize: it costs three shader runs
         // a texel (MeasureSpecular), and highlights don't need the detail. Each texel takes the
@@ -251,11 +281,67 @@ public static class ShaderBaker
         }
         Vector3[] specularColor = lightCompiled != null ? new Vector3[specularWidth * specularHeight] : null;
         float[] specularPower = lightCompiled != null ? new float[specularWidth * specularHeight] : null;
-        if (lightCompiled != null)
+        // The texel's normal in the shader's own (DirectX) tangent space: green flipped back.
+        Vector3 SpecularNormal(int full)
         {
-            Parallel.For(0, specularHeight, ParallelLimits.Options, y =>
+            if (!hasNormal)
+                return Vector3.UnitZ;
+            Vector4 packed = normal[full].ToVector4();
+            return Vector3.Normalize(new Vector3(packed.X * 2f - 1f, 1f - packed.Y * 2f, packed.Z * 2f - 1f));
+        }
+        if (lightCompiled?.Wide != null)
+        {
+            Parallel.For(0, specularHeight, ParallelLimits.Options, () => new WideMachine(lightCompiled), (y, _, lightMachine) =>
             {
-                Machine lightMachine = new Machine(lightCompiled, lightConstants);
+                int step = width / specularWidth;
+                Span<float> u = stackalloc float[Lanes], v = stackalloc float[Lanes];
+                // The normal, and the camera across it and tilted from it, by component and lane.
+                Span<float> n = stackalloc float[3 * Lanes], across = stackalloc float[3 * Lanes], tilted = stackalloc float[3 * Lanes];
+                for (int x0 = 0; x0 < specularWidth; x0 += Lanes)
+                {
+                    for (int lane = 0; lane < Lanes; lane++)
+                    {
+                        int x = Math.Min(x0 + lane, specularWidth - 1);
+                        int fx = x * step + step / 2, fy = y * step + step / 2;
+                        u[lane] = (fx + 0.5f) / width;
+                        v[lane] = (fy + 0.5f) / height;
+                        Vector3 texelNormal = SpecularNormal(fy * width + fx);
+                        (Vector3 acrossIt, Vector3 tiltedIt) = SpecularCameras(texelNormal);
+                        for (int c = 0; c < 3; c++)
+                        {
+                            n[c * Lanes + lane] = texelNormal[c];
+                            across[c * Lanes + lane] = acrossIt[c];
+                            tilted[c * Lanes + lane] = tiltedIt[c];
+                        }
+                    }
+                    Vector256<float> nx = Vector256.Create<float>(n[..Lanes]), ny = Vector256.Create<float>(n[Lanes..(2 * Lanes)]),
+                        nz = Vector256.Create<float>(n[(2 * Lanes)..]);
+                    lightMachine.SetUv(Vector256.Create<float>(u), Vector256.Create<float>(v));
+                    lightMachine.SetLight(nx, ny, nz);
+                    lightMachine.SetVariant(0, nx, ny, nz, Vector256<float>.Zero);
+                    lightMachine.SetVariant(1, Vector256.Create<float>(across[..Lanes]), Vector256.Create<float>(across[Lanes..(2 * Lanes)]),
+                        Vector256.Create<float>(across[(2 * Lanes)..]), Vector256<float>.Zero);
+                    lightMachine.SetVariant(2, Vector256.Create<float>(tilted[..Lanes]), Vector256.Create<float>(tilted[Lanes..(2 * Lanes)]),
+                        Vector256.Create<float>(tilted[(2 * Lanes)..]), Vector256<float>.Zero);
+                    lightMachine.Run();
+                    for (int lane = 0; lane < Lanes && x0 + lane < specularWidth; lane++)
+                    {
+                        int x = x0 + lane;
+                        int fx = x * step + step / 2, fy = y * step + step / 2;
+                        int i = y * specularWidth + x;
+                        specularPower[i] = 1f;
+                        if (albedo[fy * width + fx].A == 0)
+                            continue;
+                        (specularColor[i], specularPower[i]) = SolveSpecular(lightMachine.Color(0, lane), lightMachine.Color(1, lane), lightMachine.Color(2, lane));
+                    }
+                }
+                return lightMachine;
+            }, _ => { });
+        }
+        else if (lightCompiled != null)
+        {
+            Parallel.For(0, specularHeight, ParallelLimits.Options, () => new Machine(lightCompiled, lightConstants), (y, _, lightMachine) =>
+            {
                 int step = width / specularWidth;
                 for (int x = 0; x < specularWidth; x++)
                 {
@@ -266,17 +352,14 @@ public static class ShaderBaker
                     specularPower[i] = 1f;
                     if (albedo[full].A == 0)
                         continue;
-                    // The normal in the shader's own (DirectX) tangent space: green flipped back.
-                    Vector3 n = Vector3.UnitZ;
-                    if (hasNormal)
-                    {
-                        Vector4 packed = normal[full].ToVector4();
-                        n = Vector3.Normalize(new Vector3(packed.X * 2f - 1f, 1f - packed.Y * 2f, packed.Z * 2f - 1f));
-                    }
-                    (specularColor[i], specularPower[i]) = MeasureSpecular(lightMachine, uv, n);
+                    (specularColor[i], specularPower[i]) = MeasureSpecular(lightMachine, uv, SpecularNormal(full));
                 }
-            });
+                return lightMachine;
+            }, _ => { });
         }
+
+        if (WideCheck && compiled.Wide != null)
+            CheckWide(program, constants, slots, width, height, lightProgram, lightConstants, compiled, lightCompiled, hasNormal ? normal : null);
 
         // The map, scaled to fit 8 bits when the color passes 1.
         MemoryImage? specularImage = null;
@@ -305,11 +388,13 @@ public static class ShaderBaker
                         MathF.Log2(MathF.Max(specularPower[i], 1f)) / 8f);
                 }
                 specularImage = DdsTextures.Encode(specular, specularWidth, specularHeight, normalMap: false);
-                specularNote = $", {specularWidth}x{specularHeight} specular (peak {peak:0.00}, power {powerSum / weightSum:0})";
+                specularNote = $", {specularWidth}x{specularHeight} specular (peak {peak:0.00}, power {powerSum / weightSum:0}, "
+                    + (lightCompiled.Wide != null || lightCompiled.Runs != null ? $"{lightCompiled.RunsShared}/{lightCompiled.Length} shared)" : "unshared)");
             }
         }
 
-        string note = $"{width}x{height} from {baseMaterial.ObjectName.Instanced}" + (cutout ? ", cutout" : "") + (hasEmissive ? ", emissive" : "")
+        string note = $"{width}x{height} from {baseMaterial.ObjectName.Instanced}"
+            + (compiled.Wide != null || compiled.Runs != null ? $" ({compiled.RunsShared}/{compiled.Length} shared)" : "") + (cutout ? ", cutout" : "") + (hasEmissive ? ", emissive" : "")
             + specularNote;
         // Each encode is single-threaded, so the three run side by side.
         MemoryImage albedoImage = default;
@@ -328,12 +413,21 @@ public static class ShaderBaker
     // at PowerCosine. The first two differ by the color, the last two by the power.
     private static (Vector3 Color, float Power) MeasureSpecular(Machine machine, Vector2 uv, Vector3 n)
     {
-        Vector3 across = Vector3.Normalize(Vector3.Cross(n, MathF.Abs(n.X) < 0.9f ? Vector3.UnitX : Vector3.UnitY));
-        Vector3 tilted = n * PowerCosine + across * MathF.Sqrt(1f - PowerCosine * PowerCosine);
-        machine.RunLit(uv, n, n, out Vector4 full);
-        machine.RunLit(uv, n, across, out Vector4 none);
-        machine.RunLit(uv, n, tilted, out Vector4 partial);
+        (Vector3 across, Vector3 tilted) = SpecularCameras(n);
+        machine.RunLit(uv, n, n, across, tilted, out Vector4 full, out Vector4 none, out Vector4 partial);
+        return SolveSpecular(full, none, partial);
+    }
 
+    // The cameras across the normal and at PowerCosine to it (the first run's is the normal).
+    private static (Vector3 Across, Vector3 Tilted) SpecularCameras(Vector3 n)
+    {
+        Vector3 across = Vector3.Normalize(Vector3.Cross(n, MathF.Abs(n.X) < 0.9f ? Vector3.UnitX : Vector3.UnitY));
+        return (across, n * PowerCosine + across * MathF.Sqrt(1f - PowerCosine * PowerCosine));
+    }
+
+    // The color and power from the three runs' results.
+    private static (Vector3 Color, float Power) SolveSpecular(Vector4 full, Vector4 none, Vector4 partial)
+    {
         Vector3 color = Vector3.Max(full.AsVector3() - none.AsVector3(), Vector3.Zero);
         float strength = color.X + color.Y + color.Z;
         float measured = Vector3.Dot(partial.AsVector3() - none.AsVector3(), Vector3.One);
@@ -517,6 +611,72 @@ public static class ShaderBaker
             int xa = WrapX(x0), xb = WrapX(x0 + 1);
             int ya = WrapY(y0) * Width, yb = WrapY(y0 + 1) * Width;
             return Vector4.Lerp(Vector4.Lerp(_data[ya + xa], _data[ya + xb], tx), Vector4.Lerp(_data[yb + xa], _data[yb + xb], tx), ty);
+        }
+
+        // Eight bilinear samples at once, with the same float operations as Sample (Vector4.Lerp
+        // is MultiplyAddEstimate(a, 1 - t, b · t), fused where the CPU has FMA, as here) and
+        // the texel reads lane by lane. Sides that aren't powers of two, and coordinates too far
+        // out or not numbers (where int conversion could differ), go through Sample.
+        public Quad SampleWide(Vector256<float> u, Vector256<float> v)
+        {
+            Vector256<float> fx = u * Vector256.Create((float)Width) - Vector256.Create(0.5f);
+            Vector256<float> fy = v * Vector256.Create((float)Height) - Vector256.Create(0.5f);
+            Vector256<float> limit = Vector256.Create(1e9f);
+            if (!_wrapX || !_wrapY || !Vector256.LessThanAll(Vector256.Abs(fx), limit) || !Vector256.LessThanAll(Vector256.Abs(fy), limit))
+                return SampleLanes(u, v);
+
+            Vector256<float> floorX = Vector256.Floor(fx), floorY = Vector256.Floor(fy);
+            Vector256<float> tx = fx - floorX, ty = fy - floorY;
+            Vector256<int> x0 = Vector256.ConvertToInt32(floorX), y0 = Vector256.ConvertToInt32(floorY);
+            Vector256<int> maskX = Vector256.Create(Width - 1), maskY = Vector256.Create(Height - 1), one = Vector256<int>.One;
+            Vector256<int> xa = x0 & maskX, xb = (x0 + one) & maskX;
+            Vector256<int> ya = (y0 & maskY) * Vector256.Create(Width), yb = ((y0 + one) & maskY) * Vector256.Create(Width);
+
+            // The four taps' texels, by channel and lane.
+            Span<float> taps = stackalloc float[4 * 4 * Lanes];
+            Span<Vector256<int>> corners = stackalloc Vector256<int>[4];
+            corners[0] = ya + xa;
+            corners[1] = ya + xb;
+            corners[2] = yb + xa;
+            corners[3] = yb + xb;
+            for (int corner = 0; corner < 4; corner++)
+                for (int lane = 0; lane < Lanes; lane++)
+                {
+                    Vector4 texel = _data[corners[corner].GetElement(lane)];
+                    int at = corner * 4 * Lanes + lane;
+                    taps[at] = texel.X;
+                    taps[at + Lanes] = texel.Y;
+                    taps[at + 2 * Lanes] = texel.Z;
+                    taps[at + 3 * Lanes] = texel.W;
+                }
+            return new Quad
+            {
+                X = Channel(taps, 0, tx, ty), Y = Channel(taps, 1, tx, ty), Z = Channel(taps, 2, tx, ty), W = Channel(taps, 3, tx, ty),
+            };
+        }
+
+        private static Vector256<float> Channel(ReadOnlySpan<float> taps, int c, Vector256<float> tx, Vector256<float> ty)
+        {
+            Vector256<float> Tap(ReadOnlySpan<float> all, int corner) => Vector256.Create<float>(all.Slice((corner * 4 + c) * Lanes, Lanes));
+            return Lerp(Lerp(Tap(taps, 0), Tap(taps, 1), tx), Lerp(Tap(taps, 2), Tap(taps, 3), tx), ty);
+        }
+
+        private static Vector256<float> Lerp(Vector256<float> a, Vector256<float> b, Vector256<float> t) =>
+            Vector256.MultiplyAddEstimate(a, Vector256<float>.One - t, b * t);
+
+        // Eight samples through Sample, lane by lane.
+        public Quad SampleLanes(Vector256<float> u, Vector256<float> v)
+        {
+            Span<float> x = stackalloc float[Lanes], y = stackalloc float[Lanes], z = stackalloc float[Lanes], w = stackalloc float[Lanes];
+            for (int i = 0; i < Lanes; i++)
+            {
+                Vector4 s = Sample(u.GetElement(i), v.GetElement(i));
+                x[i] = s.X;
+                y[i] = s.Y;
+                z[i] = s.Z;
+                w[i] = s.W;
+            }
+            return new Quad { X = Vector256.Create<float>(x), Y = Vector256.Create<float>(y), Z = Vector256.Create<float>(z), W = Vector256.Create<float>(w) };
         }
 
         private int WrapX(int i) => _wrapX ? i & (Width - 1) : Wrap(i, Width);
@@ -809,10 +969,20 @@ public static class ShaderBaker
     private sealed class CompiledShader
     {
         public readonly int AmbientRegister, Temps, Inputs, ConstantCount, Length;
-        // Everything before the first read of AmbientColorAndSkyFactor is the same at either
-        // ambient, so it runs once per texel and only the rest runs twice.
+        // Without Runs: everything before the first read of AmbientColorAndSkyFactor is the same
+        // at either ambient, so it runs once per texel and only the rest runs twice.
         public readonly int Split;
         public readonly Segment Prefix, Suffix;
+        // The runs in one (RunsCompiler), when they can be: the base pass's two ambients or the
+        // specular bake's three cameras. Else Prefix and Suffix, the whole shader each run.
+        public readonly Runs Runs;
+        // How many instructions the runs share (run once, not once per run).
+        public readonly int RunsShared;
+        // Eight texels at a time (WideCompiler), with its constants and number of runs: the base
+        // pass's two ambients (one when it reads none) or the specular's three cameras.
+        public readonly Wide Wide;
+        public readonly Vector256<float>[] WideConstants;
+        public readonly int WideRuns;
         // What the vertex shader would pass (TEXCOORD0, the UV, is set per texel).
         public readonly Vector4[] InputValues;
         public readonly int[] UvRegisters;
@@ -821,7 +991,7 @@ public static class ShaderBaker
         // which pass it in TEXCOORD3 and their fog in TEXCOORD4.
         public readonly int[] LightRegisters, CameraRegisters;
 
-        public CompiledShader(Program program, float[] constants, Dictionary<int, Texels> slots, bool lit = false)
+        public CompiledShader(Program program, float[] constants, Dictionary<int, Texels> slots, bool lit = false, bool wide = true)
         {
             Instruction[] code = program.Code.ToArray();
             Length = code.Length;
@@ -876,8 +1046,23 @@ public static class ShaderBaker
             LightRegisters = program.Inputs.Where(kv => kv.Value == lightSemantic).Select(kv => kv.Key).ToArray();
             CameraRegisters = program.Inputs.Where(kv => kv.Value == "TEXCOORD6").Select(kv => kv.Key).ToArray();
 
-            Prefix = new SegmentCompiler(this, code, textures).Compile(0, Split);
-            Suffix = new SegmentCompiler(this, code, textures).Compile(Split, code.Length);
+            Func<Operand, bool> camera = op => op.Kind == Kind.Input && CameraRegisters.Contains(op.Index);
+            Func<Operand, bool> ambient = op => op.Kind == Kind.Constant && op.Index == AmbientRegister;
+            if (WideEnabled && wide)
+            {
+                WideRuns = lit ? 3 : AmbientRegister >= 0 ? 2 : 1;
+                Wide = WideCompiler.Compile(this, code, textures, WideRuns, lit ? camera : AmbientRegister >= 0 ? ambient : _ => false,
+                    constants, out WideConstants, out RunsShared);
+            }
+            if (Wide == null && lit)
+                Runs = RunsCompiler.Compile(this, code, textures, 3, camera, out RunsShared);
+            else if (Wide == null && AmbientRegister >= 0)
+                Runs = RunsCompiler.Compile(this, code, textures, 2, ambient, out RunsShared);
+            if (Wide == null && Runs == null)
+            {
+                Prefix = new SegmentCompiler(this, code, textures).Compile(0, Split);
+                Suffix = new SegmentCompiler(this, code, textures).Compile(Split, code.Length);
+            }
         }
     }
 
@@ -932,56 +1117,16 @@ public static class ShaderBaker
         {
             Instruction ins = _code[index];
             Operand[] o = ins.Operands;
-            Expression S(int i) => Read(o[i]);
-            Expression Op(string name, params Expression[] args) => Expression.Call(typeof(Ops).GetMethod(name)!, args);
-            Expression result;
             switch (ins.Code)
             {
                 case OpCode.DiscardNz:
-                    return Expression.IfThen(Op(nameof(Ops.NonZeroX), S(0)), Discard());
                 case OpCode.DiscardZ:
-                    return Expression.IfThen(Expression.Not(Op(nameof(Ops.NonZeroX), S(0))), Discard());
-                case OpCode.Sample:
-                {
-                    Texels texels = _textures[index];
-                    int[] s = o[2].Swizzle;
-                    result = texels == null
-                        ? Expression.Constant(Vector4.Zero)
-                        : Op(nameof(Ops.Sample), Expression.Constant(texels), S(1),
-                            Expression.Constant(s[0]), Expression.Constant(s[1]), Expression.Constant(s[2]), Expression.Constant(s[3]));
-                    break;
-                }
-                case OpCode.Mov: result = S(1); break;
-                case OpCode.Add: result = Op(nameof(Ops.Add), S(1), S(2)); break;
-                case OpCode.Mul: result = Op(nameof(Ops.Mul), S(1), S(2)); break;
-                case OpCode.Mad: result = Op(nameof(Ops.Mad), S(1), S(2), S(3)); break;
-                case OpCode.Div: result = Op(nameof(Ops.Div), S(1), S(2)); break;
-                case OpCode.Min: result = Op(nameof(Ops.Min), S(1), S(2)); break;
-                case OpCode.Max: result = Op(nameof(Ops.Max), S(1), S(2)); break;
-                case OpCode.Sqrt: result = Op(nameof(Ops.Sqrt), S(1)); break;
-                case OpCode.Rsq: result = Op(nameof(Ops.Rsq), S(1)); break;
-                case OpCode.Log: result = Op(nameof(Ops.Log), S(1)); break;
-                case OpCode.Exp: result = Op(nameof(Ops.Exp), S(1)); break;
-                case OpCode.Frc: result = Op(nameof(Ops.Frc), S(1)); break;
-                case OpCode.RoundNe: result = Op(nameof(Ops.RoundNe), S(1)); break;
-                case OpCode.RoundNi: result = Op(nameof(Ops.RoundNi), S(1)); break;
-                case OpCode.RoundPi: result = Op(nameof(Ops.RoundPi), S(1)); break;
-                case OpCode.RoundZ: result = Op(nameof(Ops.RoundZ), S(1)); break;
-                case OpCode.Dp2: result = Op(nameof(Ops.Dp2), S(1), S(2)); break;
-                case OpCode.Dp3: result = Op(nameof(Ops.Dp3), S(1), S(2)); break;
-                case OpCode.Dp4: result = Op(nameof(Ops.Dp4), S(1), S(2)); break;
-                case OpCode.Lt: result = Op(nameof(Ops.Lt), S(1), S(2)); break;
-                case OpCode.Ge: result = Op(nameof(Ops.Ge), S(1), S(2)); break;
-                case OpCode.Eq: result = Op(nameof(Ops.Eq), S(1), S(2)); break;
-                case OpCode.Ne: result = Op(nameof(Ops.Ne), S(1), S(2)); break;
-                case OpCode.Movc: result = Op(nameof(Ops.Movc), S(1), S(2), S(3)); break;
-                case OpCode.And: result = Op(nameof(Ops.And), S(1), S(2)); break;
-                case OpCode.Or: result = Op(nameof(Ops.Or), S(1), S(2)); break;
+                    return Expression.IfThen(Discards(ins, Read), Discard());
                 case OpCode.Sincos:
                 {
                     // Both results come from the source as it was before either write.
                     ParameterExpression x = Expression.Variable(typeof(Vector4), "x");
-                    List<Expression> steps = new List<Expression> { Expression.Assign(x, S(2)) };
+                    List<Expression> steps = new List<Expression> { Expression.Assign(x, Read(o[2])) };
                     if (o[0].Kind != Kind.Null)
                         steps.Add(Write(o[0], Op(nameof(Ops.Sin), x), ins.Saturate));
                     if (o[1].Kind != Kind.Null)
@@ -989,54 +1134,343 @@ public static class ShaderBaker
                     steps.Add(Expression.Empty());
                     return Expression.Block(new[] { x }, steps);
                 }
-                case OpCode.Deriv:
-                    result = Expression.Constant(Vector4.Zero);
-                    break;
+                case OpCode.Unsupported:
+                    return Unsupported(ins);
                 default:
-                    // Reached only when the texel gets this far, as with the interpreter.
-                    return Expression.Throw(Expression.New(typeof(NotSupportedException).GetConstructor([typeof(string)])!,
-                        Expression.Constant($"instruction {ins.Op}")));
+                    return Write(o[0], Computed(ins, _textures[index], Read), ins.Saturate);
             }
-            return Write(o[0], result, ins.Saturate);
         }
 
         private Expression Discard() => Expression.Block(Store(), Expression.Return(_return, Expression.Constant(false)));
 
-        private Expression Read(Operand op)
+        private Expression Read(Operand op) => Modified(op, op.Kind switch
         {
-            Expression value = op.Kind switch
-            {
-                Kind.Temp => _r[op.Index],
-                Kind.Output => _o[op.Index],
-                Kind.Input => op.Index < _shader.Inputs ? Expression.ArrayIndex(_v, Expression.Constant(op.Index)) : Expression.Constant(Vector4.Zero),
-                Kind.Constant => op.Index < _shader.ConstantCount ? Expression.ArrayIndex(_cb, Expression.Constant(op.Index)) : Expression.Constant(Vector4.Zero),
-                Kind.Literal => Expression.Constant(op.Value),
-                _ => Expression.Constant(Vector4.Zero),
-            };
-            int[] s = op.Swizzle;
-            if (op.Kind != Kind.Literal && !op.Identity)
-                value = Expression.Call(typeof(Ops).GetMethod(nameof(Ops.Swizzle))!, value,
-                    Expression.Constant(s[0]), Expression.Constant(s[1]), Expression.Constant(s[2]), Expression.Constant(s[3]));
-            if (op.Absolute)
-                value = Expression.Call(typeof(Vector4).GetMethod(nameof(Vector4.Abs), [typeof(Vector4)])!, value);
-            if (op.Negate)
-                value = Expression.Call(typeof(Vector4).GetMethod(nameof(Vector4.Negate), [typeof(Vector4)])!, value);
-            return value;
-        }
+            Kind.Temp => _r[op.Index],
+            Kind.Output => _o[op.Index],
+            Kind.Input => op.Index < _shader.Inputs ? Expression.ArrayIndex(_v, Expression.Constant(op.Index)) : Expression.Constant(Vector4.Zero),
+            Kind.Constant => op.Index < _shader.ConstantCount ? Expression.ArrayIndex(_cb, Expression.Constant(op.Index)) : Expression.Constant(Vector4.Zero),
+            Kind.Literal => Expression.Constant(op.Value),
+            _ => Expression.Constant(Vector4.Zero),
+        });
 
-        // Destination swizzles are write masks; a source's components line up with them.
         private Expression Write(Operand op, Expression value, bool saturate)
         {
             ParameterExpression bank = op.Kind == Kind.Temp ? _r[op.Index] : op.Kind == Kind.Output ? _o[op.Index] : null;
-            if (bank == null)
-                return Expression.Empty();
-            if (saturate)
-                value = Expression.Call(typeof(Ops).GetMethod(nameof(Ops.Saturate))!, value);
-            if (!op.FullMask)
-                value = Expression.Call(typeof(Ops).GetMethod(nameof(Ops.Masked))!, bank, value,
-                    Expression.Constant(op.Mask[0]), Expression.Constant(op.Mask[1]), Expression.Constant(op.Mask[2]), Expression.Constant(op.Mask[3]));
-            return Expression.Assign(bank, value);
+            return bank == null ? Expression.Empty() : Expression.Assign(bank, Written(op, bank, value, saturate));
         }
+    }
+
+    // A shader run several times at one texel with only one operand changing between runs: the
+    // base pass's ambient (0 for the emissive, 1 for the lit color) and the specular bake's camera
+    // vector (three runs). What doesn't depend on that operand runs once; the rest runs once per
+    // run, each in its own copy of the registers. These are the same float operations as running
+    // the whole shader each time, so the results are the same. variants[k] is the operand's value
+    // in run k; outputs gets each run's o0 and o2 (2k and 2k + 1); false when it discards.
+    private delegate bool Runs(Vector4[] v, Vector4[] variants, Vector4[] cb, Vector4[] outputs);
+
+    private sealed class RunsCompiler
+    {
+        private readonly CompiledShader _shader;
+        private readonly Instruction[] _code;
+        private readonly Texels[] _textures;
+        private readonly int _runs;
+        // The operand that changes between runs.
+        private readonly Func<Operand, bool> _variant;
+        private readonly ParameterExpression _v = Expression.Parameter(typeof(Vector4[]), "v");
+        private readonly ParameterExpression _variants = Expression.Parameter(typeof(Vector4[]), "variants");
+        private readonly ParameterExpression _cb = Expression.Parameter(typeof(Vector4[]), "cb");
+        private readonly ParameterExpression _outputs = Expression.Parameter(typeof(Vector4[]), "outputs");
+        // Each run's registers. A register is either shared (run 0's copy holds it for every run)
+        // or per run (every copy holds its run's whole value), and each component knows whether
+        // it differs between runs: the compiler packs unrelated values into one register's
+        // components, so a camera-dependent .xyz mustn't make the .w beside it look dependent.
+        private readonly ParameterExpression[][] _r, _o;
+        private readonly bool[] _perRunR, _perRunO;
+        private readonly bool[,] _variesR, _variesO;
+        private readonly LabelTarget _done = Expression.Label(typeof(bool), "done");
+        private bool _discardVaries;
+        private int _shared;
+
+        private RunsCompiler(CompiledShader shader, Instruction[] code, Texels[] textures, int runs, Func<Operand, bool> variant)
+        {
+            _variant = variant;
+            _shader = shader;
+            _code = code;
+            _textures = textures;
+            _runs = runs;
+            _r = Enumerable.Range(0, runs).Select(k => Enumerable.Range(0, shader.Temps)
+                .Select(i => Expression.Variable(typeof(Vector4), $"r{i}_{k}")).ToArray()).ToArray();
+            _o = Enumerable.Range(0, runs).Select(k => Enumerable.Range(0, 8)
+                .Select(i => Expression.Variable(typeof(Vector4), $"o{i}_{k}")).ToArray()).ToArray();
+            _perRunR = new bool[shader.Temps];
+            _perRunO = new bool[8];
+            _variesR = new bool[shader.Temps, 4];
+            _variesO = new bool[8, 4];
+        }
+
+        // Null when a discard depends on the variant: the runs could end at different points, so
+        // the shader runs whole each time instead.
+        public static Runs Compile(CompiledShader shader, Instruction[] code, Texels[] textures, int runs, Func<Operand, bool> variant,
+            out int shared)
+        {
+            shared = 0;
+            RunsCompiler compiler = new RunsCompiler(shader, code, textures, runs, variant);
+            List<ParameterExpression> registers = compiler._r.SelectMany(bank => bank).Concat(compiler._o.SelectMany(bank => bank)).ToList();
+            // Every register starts at zero, as the machine clears them before a run.
+            List<Expression> body = registers.Select(register => (Expression)Expression.Assign(register, Expression.Constant(Vector4.Zero))).ToList();
+            for (int i = 0; i < code.Length; i++)
+                body.Add(compiler.Emit(i));
+            if (compiler._discardVaries)
+                return null;
+            shared = compiler._shared;
+            body.Add(compiler.StoreOutputs());
+            body.Add(Expression.Label(compiler._done, Expression.Constant(true)));
+            BlockExpression block = Expression.Block(typeof(bool), registers, body);
+            return Expression.Lambda<Runs>(block, compiler._v, compiler._variants, compiler._cb, compiler._outputs).Compile();
+        }
+
+        private Expression Emit(int index)
+        {
+            Instruction ins = _code[index];
+            Operand[] o = ins.Operands;
+            if (ins.Code == OpCode.Unsupported)
+                return Unsupported(ins);
+            if (ins.Code is OpCode.DiscardNz or OpCode.DiscardZ)
+            {
+                if (Varies(o[0]))
+                {
+                    _discardVaries = true;
+                    return Expression.Empty();
+                }
+                return Expression.IfThen(Discards(ins, op => Read(op, 0)),
+                    Expression.Block(StoreOutputs(), Expression.Return(_done, Expression.Constant(false))));
+            }
+
+            bool sincos = ins.Code == OpCode.Sincos;
+            Operand[] sources = sincos ? [o[2]] : o[1..];
+            Operand[] destinations = (sincos ? new[] { o[0], o[1] } : [o[0]]).Where(d => d.Kind is Kind.Temp or Kind.Output).ToArray();
+            bool varies = sources.Any(Varies);
+            int copies = varies ? _runs : 1;
+            if (!varies)
+                _shared++;
+
+            // Every copy's new values first, then the writes, so no copy reads another's write.
+            List<ParameterExpression> temps = new List<ParameterExpression>();
+            List<Expression> steps = new List<Expression>();
+            ParameterExpression[,] values = new ParameterExpression[copies, destinations.Length];
+            for (int k = 0; k < copies; k++)
+            {
+                int run = k;
+                Func<Operand, Expression> read = op => Read(op, run);
+                Expression[] results;
+                if (sincos)
+                {
+                    ParameterExpression x = Expression.Variable(typeof(Vector4), "x");
+                    temps.Add(x);
+                    steps.Add(Expression.Assign(x, read(o[2])));
+                    results = destinations.Select(d => Op(d == o[0] ? nameof(Ops.Sin) : nameof(Ops.Cos), x)).ToArray();
+                }
+                else
+                    results = destinations.Length == 0 ? [] : [Computed(ins, _textures[index], read)];
+                for (int d = 0; d < destinations.Length; d++)
+                {
+                    values[k, d] = Expression.Variable(typeof(Vector4), "w");
+                    temps.Add(values[k, d]);
+                    steps.Add(Expression.Assign(values[k, d], results[d]));
+                }
+            }
+
+            for (int d = 0; d < destinations.Length; d++)
+            {
+                Operand destination = destinations[d];
+                bool perRun = PerRun(destination);
+                // A run's own value goes to its own copy, so a shared register becomes per run
+                // (its unwritten components taken from run 0's copy); a shared value goes to
+                // every copy of a per-run register, else only to run 0's.
+                // Run 0's copy is written last: the others may still read it.
+                if (varies || perRun)
+                {
+                    for (int k = _runs - 1; k >= 0; k--)
+                        steps.Add(Expression.Assign(Bank(destination, k),
+                            Written(destination, Bank(destination, perRun ? k : 0), values[varies ? k : 0, d], ins.Saturate)));
+                }
+                else
+                    steps.Add(Expression.Assign(Bank(destination, 0), Written(destination, Bank(destination, 0), values[0, d], ins.Saturate)));
+
+                bool[,] flags = destination.Kind == Kind.Temp ? _variesR : _variesO;
+                bool anyVaries = false;
+                for (int c = 0; c < 4; c++)
+                {
+                    if (destination.Mask[c])
+                        flags[destination.Index, c] = varies;
+                    anyVaries |= flags[destination.Index, c];
+                }
+                // Once no component differs, every copy holds the same value, so run 0's will do.
+                SetPerRun(destination, varies || (perRun && anyVaries));
+            }
+            steps.Add(Expression.Empty());
+            return Expression.Block(temps, steps);
+        }
+
+        // Whether a source's value differs between runs: any component it reads does.
+        private bool Varies(Operand op)
+        {
+            if (_variant(op))
+                return true;
+            if (op.Kind is not (Kind.Temp or Kind.Output))
+                return false;
+            bool[,] flags = op.Kind == Kind.Temp ? _variesR : _variesO;
+            return op.Swizzle.Any(c => flags[op.Index, c]);
+        }
+
+        private bool PerRun(Operand op) => op.Kind == Kind.Temp ? _perRunR[op.Index] : _perRunO[op.Index];
+
+        private void SetPerRun(Operand op, bool perRun)
+        {
+            if (op.Kind == Kind.Temp)
+                _perRunR[op.Index] = perRun;
+            else
+                _perRunO[op.Index] = perRun;
+        }
+
+        private ParameterExpression Bank(Operand op, int run) => op.Kind == Kind.Temp ? _r[run][op.Index] : _o[run][op.Index];
+
+        // A register's value in this run: its own copy when it's per run, else run 0's.
+        private Expression Current(Operand op, int run) => Bank(op, PerRun(op) ? run : 0);
+
+        private Expression Read(Operand op, int run) => Modified(op, op.Kind switch
+        {
+            Kind.Temp or Kind.Output => Current(op, run),
+            _ when _variant(op) => Expression.ArrayIndex(_variants, Expression.Constant(run)),
+            Kind.Input => op.Index < _shader.Inputs ? Expression.ArrayIndex(_v, Expression.Constant(op.Index)) : Expression.Constant(Vector4.Zero),
+            Kind.Constant => op.Index < _shader.ConstantCount ? Expression.ArrayIndex(_cb, Expression.Constant(op.Index)) : Expression.Constant(Vector4.Zero),
+            Kind.Literal => Expression.Constant(op.Value),
+            _ => Expression.Constant(Vector4.Zero),
+        });
+
+        // Each run's o0 and o2 as they stand at this point.
+        private Expression StoreOutputs()
+        {
+            Operand o0 = new Operand { Kind = Kind.Output, Index = 0 }, o2 = new Operand { Kind = Kind.Output, Index = 2 };
+            return Expression.Block(Enumerable.Range(0, _runs).SelectMany(k => new[]
+            {
+                (Expression)Expression.Assign(Expression.ArrayAccess(_outputs, Expression.Constant(2 * k)), Current(o0, k)),
+                Expression.Assign(Expression.ArrayAccess(_outputs, Expression.Constant(2 * k + 1)), Current(o2, k)),
+            }));
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // The instructions' expressions, shared by both compilers
+    // ---------------------------------------------------------------
+
+    private static Expression Op(string name, params Expression[] args) => Expression.Call(typeof(Ops).GetMethod(name)!, args);
+
+    // What a discard tests: true discards the texel.
+    private static Expression Discards(Instruction ins, Func<Operand, Expression> read)
+    {
+        Expression nonZero = Op(nameof(Ops.NonZeroX), read(ins.Operands[0]));
+        return ins.Code == OpCode.DiscardNz ? nonZero : Expression.Not(nonZero);
+    }
+
+    // Reached only when the texel gets this far, as with the interpreter.
+    private static Expression Unsupported(Instruction ins) =>
+        Expression.Throw(Expression.New(typeof(NotSupportedException).GetConstructor([typeof(string)])!, Expression.Constant($"instruction {ins.Op}")));
+
+    // The value an instruction computes for its first operand, its sources read through `read`
+    // (not for discards, sincos, or unsupported instructions).
+    private static Expression Computed(Instruction ins, Texels texels, Func<Operand, Expression> read)
+    {
+        Operand[] o = ins.Operands;
+        Expression S(int i) => read(o[i]);
+        switch (ins.Code)
+        {
+            case OpCode.Sample:
+            {
+                if (texels == null)
+                    return Expression.Constant(Vector4.Zero);
+                ParameterExpression coord = Expression.Variable(typeof(Vector4), "uv");
+                Expression sampled = Expression.Call(Expression.Constant(texels), typeof(Texels).GetMethod(nameof(Texels.Sample))!,
+                    Expression.Field(coord, "X"), Expression.Field(coord, "Y"));
+                Operand resource = o[2];
+                return Expression.Block(typeof(Vector4), [coord], Expression.Assign(coord, S(1)),
+                    resource.Identity ? sampled : Swizzled(sampled, resource.Swizzle));
+            }
+            case OpCode.Mov: return S(1);
+            case OpCode.Add: return Op(nameof(Ops.Add), S(1), S(2));
+            case OpCode.Mul: return Op(nameof(Ops.Mul), S(1), S(2));
+            case OpCode.Mad: return Op(nameof(Ops.Mad), S(1), S(2), S(3));
+            case OpCode.Div: return Op(nameof(Ops.Div), S(1), S(2));
+            case OpCode.Min: return Op(nameof(Ops.Min), S(1), S(2));
+            case OpCode.Max: return Op(nameof(Ops.Max), S(1), S(2));
+            case OpCode.Sqrt: return Op(nameof(Ops.Sqrt), S(1));
+            case OpCode.Rsq: return Op(nameof(Ops.Rsq), S(1));
+            case OpCode.Log: return Op(nameof(Ops.Log), S(1));
+            case OpCode.Exp: return Op(nameof(Ops.Exp), S(1));
+            case OpCode.Frc: return Op(nameof(Ops.Frc), S(1));
+            case OpCode.RoundNe: return Op(nameof(Ops.RoundNe), S(1));
+            case OpCode.RoundNi: return Op(nameof(Ops.RoundNi), S(1));
+            case OpCode.RoundPi: return Op(nameof(Ops.RoundPi), S(1));
+            case OpCode.RoundZ: return Op(nameof(Ops.RoundZ), S(1));
+            case OpCode.Dp2: return Op(nameof(Ops.Dp2), S(1), S(2));
+            case OpCode.Dp3: return Op(nameof(Ops.Dp3), S(1), S(2));
+            case OpCode.Dp4: return Op(nameof(Ops.Dp4), S(1), S(2));
+            case OpCode.Lt: return Op(nameof(Ops.Lt), S(1), S(2));
+            case OpCode.Ge: return Op(nameof(Ops.Ge), S(1), S(2));
+            case OpCode.Eq: return Op(nameof(Ops.Eq), S(1), S(2));
+            case OpCode.Ne: return Op(nameof(Ops.Ne), S(1), S(2));
+            case OpCode.Movc: return Op(nameof(Ops.Movc), S(1), S(2), S(3));
+            case OpCode.And: return Op(nameof(Ops.And), S(1), S(2));
+            case OpCode.Or: return Op(nameof(Ops.Or), S(1), S(2));
+            // Screen-space derivatives are zero over a flat texel grid.
+            case OpCode.Deriv: return Expression.Constant(Vector4.Zero);
+            default: throw new InvalidOperationException($"no single result for {ins.Op}");
+        }
+    }
+
+    // A source operand's modifiers over its register's value.
+    private static Expression Modified(Operand op, Expression value)
+    {
+        if (op.Kind != Kind.Literal && !op.Identity)
+            value = Swizzled(value, op.Swizzle);
+        if (op.Absolute)
+            value = Expression.Call(typeof(Vector4).GetMethod(nameof(Vector4.Abs), [typeof(Vector4)])!, value);
+        if (op.Negate)
+            value = Expression.Call(typeof(Vector4).GetMethod(nameof(Vector4.Negate), [typeof(Vector4)])!, value);
+        return value;
+    }
+
+    private static readonly string[] Components = ["X", "Y", "Z", "W"];
+    private static readonly System.Reflection.ConstructorInfo Vector4Of4 =
+        typeof(Vector4).GetConstructor([typeof(float), typeof(float), typeof(float), typeof(float)])!;
+    private static readonly System.Reflection.ConstructorInfo Vector4Of1 = typeof(Vector4).GetConstructor([typeof(float)])!;
+
+    // A swizzle built from the vector's fields, so the JIT sees the components as constants.
+    // Calling a helper with the components as arguments wasn't inlined into the compiled
+    // shaders, and its per-component switch was a quarter of all bake time.
+    private static Expression Swizzled(Expression value, int[] s)
+    {
+        ParameterExpression vector = value as ParameterExpression;
+        ParameterExpression temp = null;
+        if (vector == null)
+            vector = temp = Expression.Variable(typeof(Vector4), "s");
+        Expression swizzled = s[0] == s[1] && s[1] == s[2] && s[2] == s[3]
+            ? Expression.New(Vector4Of1, Expression.Field(vector, Components[s[0]]))
+            : Expression.New(Vector4Of4, Expression.Field(vector, Components[s[0]]), Expression.Field(vector, Components[s[1]]),
+                Expression.Field(vector, Components[s[2]]), Expression.Field(vector, Components[s[3]]));
+        return temp == null ? swizzled : Expression.Block(typeof(Vector4), [temp], Expression.Assign(temp, value), swizzled);
+    }
+
+    // The value a destination gets: saturated, and, past its write mask, what `current` held
+    // (destination swizzles are write masks; a source's components line up with them).
+    private static Expression Written(Operand op, Expression current, Expression value, bool saturate)
+    {
+        if (saturate)
+            value = Op(nameof(Ops.Saturate), value);
+        if (!op.FullMask)
+            value = Op(nameof(Ops.Masked), current, value,
+                Expression.Constant(op.Mask[0]), Expression.Constant(op.Mask[1]), Expression.Constant(op.Mask[2]), Expression.Constant(op.Mask[3]));
+        return value;
     }
 
     // The instructions' math, called from the compiled shaders.
@@ -1077,12 +1511,6 @@ public static class ShaderBaker
         public static Vector4 Saturate(Vector4 v) => Vector4.Clamp(v, Vector4.Zero, Vector4.One);
         public static Vector4 Masked(Vector4 current, Vector4 value, bool x, bool y, bool z, bool w) =>
             new(x ? value.X : current.X, y ? value.Y : current.Y, z ? value.Z : current.Z, w ? value.W : current.W);
-        public static Vector4 Swizzle(Vector4 v, int x, int y, int z, int w) => new(Get(v, x), Get(v, y), Get(v, z), Get(v, w));
-
-        public static Vector4 Sample(Texels texels, Vector4 coord, int x, int y, int z, int w) =>
-            Swizzle(texels.Sample(coord.X, coord.Y), x, y, z, w);
-
-        private static float Get(Vector4 v, int c) => c switch { 0 => v.X, 1 => v.Y, 2 => v.Z, _ => v.W };
         private static uint Bits(float f) => BitConverter.SingleToUInt32Bits(f);
         private static float Float(uint u) => BitConverter.UInt32BitsToSingle(u);
         private static float Mask(bool b) => Float(b ? 0xFFFFFFFF : 0u);
@@ -1092,6 +1520,7 @@ public static class ShaderBaker
     {
         private readonly CompiledShader _shader;
         private readonly Vector4[] _v, _cb, _r, _o, _savedR, _savedO;
+        private readonly Vector4[] _variants = new Vector4[3], _outputs = new Vector4[6];
 
         public Machine(CompiledShader shader, float[] constants)
         {
@@ -1110,6 +1539,18 @@ public static class ShaderBaker
         // false when the ambient-0 run discards the pixel.
         public bool Run(Vector2 uv, out Vector4 emit, out Vector4 lit, out Vector4 normal)
         {
+            if (_shader.Runs != null)
+            {
+                foreach (int register in _shader.UvRegisters)
+                    _v[register] = new Vector4(uv, 0f, 0f);
+                _variants[0] = Vector4.Zero;
+                _variants[1] = Vector4.One;
+                bool runsKept = _shader.Runs(_v, _variants, _cb, _outputs);
+                emit = _outputs[0];
+                lit = _outputs[2];
+                normal = _outputs[3];
+                return runsKept;
+            }
             Array.Clear(_r);
             Array.Clear(_o);
             foreach (int register in _shader.UvRegisters)
@@ -1154,6 +1595,31 @@ public static class ShaderBaker
             bool kept = _shader.Prefix(_v, _cb, _r, _o) && _shader.Suffix(_v, _cb, _r, _o);
             color = _o[0];
             return kept;
+        }
+
+        // Three lit runs at one UV, seen from three cameras: in one go when the shader compiled
+        // that way (CompiledShader.Runs), else run whole three times.
+        public void RunLit(Vector2 uv, Vector3 light, Vector3 cameraA, Vector3 cameraB, Vector3 cameraC,
+            out Vector4 colorA, out Vector4 colorB, out Vector4 colorC)
+        {
+            if (_shader.Runs == null)
+            {
+                RunLit(uv, light, cameraA, out colorA);
+                RunLit(uv, light, cameraB, out colorB);
+                RunLit(uv, light, cameraC, out colorC);
+                return;
+            }
+            foreach (int register in _shader.UvRegisters)
+                _v[register] = new Vector4(uv, 0f, 0f);
+            foreach (int register in _shader.LightRegisters)
+                _v[register] = new Vector4(light, 0f);
+            _variants[0] = new Vector4(cameraA, 0f);
+            _variants[1] = new Vector4(cameraB, 0f);
+            _variants[2] = new Vector4(cameraC, 0f);
+            _shader.Runs(_v, _variants, _cb, _outputs);
+            colorA = _outputs[0];
+            colorB = _outputs[2];
+            colorC = _outputs[4];
         }
     }
 }
