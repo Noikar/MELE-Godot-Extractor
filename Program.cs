@@ -70,9 +70,9 @@ public static class Program
         // Finding the install needs nothing from LEX or the game.
         if (args[0] == "locate")
             return LocateCommand.Run();
-        if (args[0] == "manifest" && args.Length >= 4)
+        if ((args[0] == "manifest" && args.Length >= 4) || (args[0] == "extract" && args.Length >= 3))
         {
-            GameRoot = args[2];
+            GameRoot = args[0] == "extract" ? args[1] : args[2];
             // The game reads a single pipe; an unread stderr could fill up and stall us.
             Console.SetError(Console.Out);
         }
@@ -84,8 +84,9 @@ public static class Program
             return 2;
         }
 
-        // Always one core free; --background (the game extracting while it's played) takes half.
-        ParallelLimits.Apply(background: args.Contains("--background"));
+        // Always one core free; --background (the game extracting while it's played) takes half,
+        // and --below-normal (the game's first run) lowers the priority alone.
+        ParallelLimits.Apply(background: args.Contains("--background"), belowNormal: args.Contains("--below-normal"));
 
         // Native helpers LEX ships next to its DLLs (texture conversion, etc.).
         SetDllDirectory(LexDir);
@@ -109,6 +110,7 @@ public static class Program
                 "prop" when args.Length >= 4 => RunProp(args[1], args[2], args[3]),
                 "find" when args.Length >= 5 => FindCommand.Run(args[1], args[2], args[3], args[4]),
                 "manifest" when args.Length >= 4 => ManifestCommand.Run(args[1], args[3], args[4..]),
+                "extract" when args.Length >= 3 => ExtractCommand.Run(args[2]),
                 "music" when args.Length >= 3 => MusicCommand.Run(args[1], args[2..]),
                 "exports" when args.Length >= 2 => ExportsCommand.Run(args[1], args.Length >= 3 ? args[2] : null),
                 "props" when args.Length >= 3 => PropsCommand.Run(args[1], args[2]),
@@ -179,11 +181,17 @@ public static class Program
                   Searches every package matching the glob for exports of <class> whose path
                   contains <filter>, e.g.: find <CookedPCConsole> BioH_*.pcc AnimSequence Idle
 
-              manifest <characters.json|weapons.json|levels.json|powers.json|canon.json|props.json|glyphs.json> <game root> <out folder> [--only <id>,...]
+              manifest <characters.json|weapons.json|levels.json|powers.json|canon.json|props.json|glyphs.json> <game root> <out folder> [--only <id>,...] [--lanes <n>]
                   Exports every entry of the manifest (character or weapon models, levels with their
-                  music, powers' sounds, conversations' canon lines and voices, props, or button glyphs) from that install into the folder, printing "PROGRESS <n>/<total>
-                  <name>" before each and "OK <id>" after each success (the game's first-run
-                  extractor reads these lines). --only exports just those entries.
+                  music, powers' sounds, conversations' canon lines and voices, props, or button
+                  glyphs) from that install into the folder, several at once, printing "START",
+                  "OK", and "FAILED" lines for each (ExtractQueue.cs). --only exports just those
+                  entries; --lanes runs at most n at once.
+
+              extract <game root> <job.json> [--below-normal]
+                  The game's first-run extraction: every manifest the job lists, in one shared
+                  queue, each level's NPC looks queued as soon as the level is written
+                  (ExtractCommand.cs). --below-normal runs at below-normal priority.
 
               music <out folder> <MusicID>...
                   Exports Mass Effect 1's area music by MusicID (the names its music volumes

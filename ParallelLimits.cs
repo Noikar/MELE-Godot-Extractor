@@ -10,20 +10,23 @@ namespace LexExport;
 //
 // Windows 11 may also throttle a process it considers in the background (EcoQoS: efficiency
 // cores, lower clocks), which a console tool started by the game can look like. A foreground
-// export opts out; --background opts in.
+// export (--below-normal too) opts out; --background opts in.
 public static class ParallelLimits
 {
     public static ParallelOptions Options { get; private set; } = new() { MaxDegreeOfParallelism = Math.Max(1, Environment.ProcessorCount - 1) };
 
     public static int Cores => Options.MaxDegreeOfParallelism;
 
-    public static void Apply(bool background)
+    // belowNormal (--below-normal, the game's first-run extraction) keeps every core but one at
+    // below-normal priority: as fast on an otherwise idle PC, while anything else the player runs
+    // stays responsive. The developer scripts run at normal priority.
+    public static void Apply(bool background, bool belowNormal = false)
     {
         int total = Environment.ProcessorCount;
         int cores = background ? Math.Max(1, total / 2) : Math.Max(1, total - 1);
         Options = new ParallelOptions { MaxDegreeOfParallelism = cores };
         using Process self = Process.GetCurrentProcess();
-        if (background)
+        if (background || belowNormal)
             self.PriorityClass = ProcessPriorityClass.BelowNormal;
         SetPowerThrottling(self, background);
         // Affinity masks cover 64 processors; past that (or on one core) leave it to the OS.

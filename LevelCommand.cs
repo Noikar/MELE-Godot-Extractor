@@ -1825,8 +1825,12 @@ public partial class LevelBuilder
     }
 
     // Material (blend) -> how many mesh sections DrawnMaterial dropped, for this run's level
-    // (emptied when one starts).
-    internal static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> DroppedSections = new();
+    // (emptied when one starts): the entry's own, since levels export side by side
+    // (ExtractQueue), else the process's.
+    internal static System.Collections.Concurrent.ConcurrentDictionary<string, int> DroppedSections =>
+        EntryScope.Current?.DroppedSections ?? ProcessDroppedSections;
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, int> ProcessDroppedSections = new();
 
     private static IMeshBuilder<MaterialBuilder> AddSections<TvM>(MeshBuilder<VertexPositionNormalTangent, TvM, VertexEmpty> builder,
         VertexBuilder<VertexPositionNormalTangent, TvM, VertexEmpty>[] vertices, MeshGeometry g, MaterialBuilder[] materials)

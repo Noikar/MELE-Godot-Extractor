@@ -20,6 +20,10 @@ public sealed class EntryScope : IDisposable
 
     private readonly StringWriter _log = new();
 
+    // A level's dropped mesh sections (LevelBuilder.DroppedSections), per entry so two levels
+    // exporting at once keep their own counts.
+    public System.Collections.Concurrent.ConcurrentDictionary<string, int> DroppedSections { get; } = new();
+
     // Written by the entry's own threads at once, so synchronized.
     public TextWriter Log { get; }
 
@@ -98,9 +102,10 @@ public sealed class EntryLog : TextWriter
 }
 
 // A long entry's steps (a level's packages, building, saving, music), printed straight out as
-// "STEP <n>/<total> <name>" as each starts, for the game's second progress bar. Total is set
-// once the entry knows it; outside a manifest run the lines go to the console as they are.
-public sealed class EntrySteps
+// "STEP <kind> <id> <n>/<total> <name>" as each starts, for the game's list of what's running
+// (item is "<kind> <id>", ExtractQueue's). Total is set once the entry knows it; outside a
+// manifest run the lines go to the console as they are.
+public sealed class EntrySteps(string item)
 {
     private int _done;
 
@@ -108,7 +113,7 @@ public sealed class EntrySteps
 
     public void Next(string name)
     {
-        string line = $"STEP {++_done}/{Math.Max(Total, _done)} {name}\n";
+        string line = $"STEP {item} {++_done}/{Math.Max(Total, _done)} {name}\n";
         if (Console.Out is EntryLog log)
             log.Direct(line);
         else
