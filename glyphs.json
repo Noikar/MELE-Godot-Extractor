@@ -29,7 +29,7 @@
     {
       "id": "le1_xbox",
       "label": "Xbox buttons (ME1)",
-      "note": "LE1's anonymous Xbox icons (near-white, dark outline), tinted to the theme. The ids were matched by eye on the exported sheet; a D-pad arm's icon is the cross with that arm hollow.",
+      "note": "LE1's anonymous Xbox icons (near-white, dark outline), tinted to the theme. The ids were matched by eye on the exported sheet; a D-pad arm's icon is the cross with that arm hollow; the sticks (0.49.0.5) plain, with arrows along one axis (_h, _v), and pressed (l3, r3).",
       "package": "ME1/Startup_INT.pcc",
       "tint": true,
       "glyphs": {
@@ -43,7 +43,15 @@
         "xbox_dpad_left": "GUI_SF_SharedAssets.XBox_ControllerIcons_I39",
         "xbox_dpad_right": "GUI_SF_SharedAssets.XBox_ControllerIcons_I36",
         "xbox_start": "GUI_SF_SharedAssets.XBox_ControllerIcons_I42",
-        "xbox_back": "GUI_SF_SharedAssets.XBox_ControllerIcons_I45"
+        "xbox_back": "GUI_SF_SharedAssets.XBox_ControllerIcons_I45",
+        "xbox_ls": "GUI_SF_SharedAssets.XBox_ControllerIcons_I1B",
+        "xbox_rs": "GUI_SF_SharedAssets.XBox_ControllerIcons_I1E",
+        "xbox_ls_h": "GUI_SF_SharedAssets.XBox_ControllerIcons_I15",
+        "xbox_ls_v": "GUI_SF_SharedAssets.XBox_ControllerIcons_IF",
+        "xbox_rs_h": "GUI_SF_SharedAssets.XBox_ControllerIcons_I18",
+        "xbox_rs_v": "GUI_SF_SharedAssets.XBox_ControllerIcons_I12",
+        "xbox_l3": "GUI_SF_SharedAssets.XBox_ControllerIcons_I2D",
+        "xbox_r3": "GUI_SF_SharedAssets.XBox_ControllerIcons_I30"
       }
     },
     {
@@ -76,7 +84,15 @@
         "ps_dpad_left": "GUI_SF_SharedAssets.PS3_ControllerIcons_I36",
         "ps_dpad_right": "GUI_SF_SharedAssets.PS3_ControllerIcons_I33",
         "ps_options": "GUI_SF_SharedAssets.PS3_ControllerIcons_I3F",
-        "ps_touchpad": "GUI_SF_SharedAssets.PS3_ControllerIcons_I42"
+        "ps_touchpad": "GUI_SF_SharedAssets.PS3_ControllerIcons_I42",
+        "ps_ls": "GUI_SF_SharedAssets.PS3_ControllerIcons_I2D",
+        "ps_rs": "GUI_SF_SharedAssets.PS3_ControllerIcons_I27",
+        "ps_ls_h": "GUI_SF_SharedAssets.PS3_ControllerIcons_I12",
+        "ps_ls_v": "GUI_SF_SharedAssets.PS3_ControllerIcons_IF",
+        "ps_rs_h": "GUI_SF_SharedAssets.PS3_ControllerIcons_I9",
+        "ps_rs_v": "GUI_SF_SharedAssets.PS3_ControllerIcons_IC",
+        "ps_l3": "GUI_SF_SharedAssets.PS3_ControllerIcons_I2A",
+        "ps_r3": "GUI_SF_SharedAssets.PS3_ControllerIcons_I24"
       }
     }
   ]

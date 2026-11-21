@@ -38,6 +38,16 @@ public static class Program
 
     public static int Main(string[] args)
     {
+        // The game reads our output as UTF-8 and parses numbers the invariant way. With the
+        // system's culture (en-SE: "0,5", a no-break space between a Vector3's parts) written in
+        // the console's OEM code page, the no-break space arrived as byte 0xFF and flooded the
+        // client log with "Invalid UTF-8 leading byte". No BOM, so the first line stays clean.
+        Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+        System.Globalization.CultureInfo.DefaultThreadCurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.CultureInfo.CurrentCulture = System.Globalization.CultureInfo.InvariantCulture;
+        System.Globalization.CultureInfo.CurrentUICulture = System.Globalization.CultureInfo.InvariantCulture;
+
         if (args.Length == 0)
         {
             PrintUsage();

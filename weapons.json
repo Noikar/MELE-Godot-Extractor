@@ -63,6 +63,25 @@
         "--vfx",
         "BIOG_V_C_Weapons_Z.01_Generic.PST_Generic_VFX"
       ]
+    },
+    {
+      "id": "rifle_geth",
+      "label": "Geth pulse rifle",
+      "note": "LE1's geth weapon (GTH, ASLa), carried by the geth NPCs; not a player item yet. Its own fold clips from WPN_GTH_Main. Fire and impact sounds from ME1 GTH_Generic_VFX (Default_WPN_GTH_Appr m_vfxSpecs).",
+      "package": "ME1/BIOC_Materials.pcc",
+      "out": "Geth/pulse_rifle.glb",
+      "args": [
+        "BIOG_WPN_GTH_R.ASLa.WPN_GTH_ASLa_MDL",
+        "--anim",
+        "BIOG_WPN_A.WPN_GTH_Main_WPN_Expand=Expand",
+        "--anim",
+        "BIOG_WPN_A.WPN_GTH_Main_WPN_Collapse=Collapse",
+        "--anim",
+        "BIOG_WPN_A.WPN_GTH_Main_WPN_Collapsed=Collapsed",
+        "--sounds",
+        "--vfx",
+        "BIOG_V_C_Weapons_Z.07_Geth.GTH_Generic_VFX"
+      ]
     }
   ]
 }

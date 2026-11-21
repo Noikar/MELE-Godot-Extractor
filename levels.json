@@ -63,6 +63,24 @@
         "ME1/BIOA_STA20_06consort_DSG.pcc",
         "ME1/BIOA_STA20_10udina_DSG.pcc"
       ]
+    },
+    {
+      "id": "firebase_white",
+      "label": "Combat Simulator (Firebase White)",
+      "map": "FirebaseWhite",
+      "note": "ME3's multiplayer map Firebase White (BioP_MPNov streams BioA_MPNov and its _000_BG, _100Exterior, and _White sublevels, plus BioD_MPNov). LE3 draws its sun and floodlights live over static shadow maps (light_passes). The Cerberus fighters and gunship flying overhead (InterpActor_5 to _14 in _000_BG) are left out: war-era dressing. The two Kodiaks (BioD_MPNov SkeletalMeshActor_2, _3) are skeletal meshes we don't export, so their door frames (InterpActor_0, _1, _3, _4) and jet emitters (all 16 Emitters) are left out too until the shuttles themselves are.",
+      "packages": [
+        "ME3/BioA_MPNov*.pcc",
+        "ME3/BioD_MPNov.pcc",
+        "ME3/BioP_MPNov.pcc"
+      ],
+      "light_passes": true,
+      "paths": true,
+      "exclude": [
+        { "package": "BioA_MPNov_000_BG", "actors": "InterpActor_5,InterpActor_6,InterpActor_7,InterpActor_8,InterpActor_9,InterpActor_10,InterpActor_11,InterpActor_12,InterpActor_13,InterpActor_14" },
+        { "package": "BioD_MPNov", "actors": "InterpActor_0,InterpActor_1,InterpActor_3,InterpActor_4,Emitter_*" }
+      ],
+      "collision_bounds": { "min": [-60, -50, -100], "max": [106, 44, 60] }
     }
   ]
 }
