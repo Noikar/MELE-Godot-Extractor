@@ -52,6 +52,9 @@ using COLLISION_VERTEX = VertexBuilder<VertexPosition, VertexEmpty, VertexEmpty>
 //                        or a blocking volume
 //   Collision/Trimesh_<package>  per-triangle collision, in world space, of the meshes that
 //                        block the player with their full geometry
+//   Collision/Trimesh_<package>_Weapons, and hulls with "weapons_only": the collision of meshes
+//                        that stop only zero-extent traces (weapons, sight): BlockNonZeroExtent
+//                        off, BlockZeroExtent on (ME3 leaves capsules to blocking volumes)
 //
 // The game's level loader turns the Collision meshes into physics shapes and drops them.
 // Which collision a mesh uses follows Unreal 3's rule for actor movement: the simplified
@@ -377,6 +380,9 @@ public partial class LevelBuilder
     private readonly NodeBuilder _collision;
     // The package being read's trimesh for meshes that cast no shadow.
     private PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> _shadowlessTrimesh;
+    // ... and for meshes that only stop zero-extent traces (BlocksWeapons without BlocksPlayer).
+    private PrimitiveBuilder<MaterialBuilder, VertexPosition, VertexEmpty, VertexEmpty> _weaponsTrimesh;
+    private int _weaponsTriangles, _weaponsHulls;
     private readonly NodeBuilder _lightmapPagesNode;
     private readonly NodeBuilder _particles;
     private readonly NodeBuilder _particleAssets;
@@ -521,6 +527,9 @@ public partial class LevelBuilder
         // passes through (AddHull).
         MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty> shadowless = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Trimesh_{packageName}_Shadowless");
         _shadowlessTrimesh = shadowless.UsePrimitive(_collisionMaterial);
+        MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty> weapons = new MeshBuilder<VertexPosition, VertexEmpty, VertexEmpty>($"Trimesh_{packageName}_Weapons");
+        _weaponsTrimesh = weapons.UsePrimitive(_collisionMaterial);
+        int weaponsBefore = _weaponsTriangles;
         int instancesBefore = _instances, lightsBefore = _lightCount, hullsBefore = _hullCount, trisBefore = _trimeshTriangles;
         int shadowlessBefore = _shadowlessTriangles;
         _receivers.Clear();
@@ -602,6 +611,12 @@ public partial class LevelBuilder
             NodeBuilder shadowlessNode = _collision.CreateNode(shadowless.Name);
             shadowlessNode.Extras = new JsonObject { ["blocks_light"] = false };
             _scene.AddRigidMesh(shadowless, shadowlessNode);
+        }
+        if (_weaponsTriangles > weaponsBefore)
+        {
+            NodeBuilder weaponsNode = _collision.CreateNode(weapons.Name);
+            weaponsNode.Extras = new JsonObject { ["blocks_light"] = false, ["weapons_only"] = true };
+            _scene.AddRigidMesh(weapons, weaponsNode);
         }
 
         Console.WriteLine($"{packageName}: {_instances - instancesBefore} mesh instances, {_lightCount - lightsBefore} lights, "
@@ -1227,16 +1242,25 @@ public partial class LevelBuilder
                 mover: mover, mergeable: mover == null);
 
         // A mover's collision would stay at its start (LevelMovers.cs).
-        if (mover != null || !BlocksPlayer(actorProps, componentProps))
+        if (mover != null)
             return;
-        // UE3's light traces only meet primitives that cast shadows (TRACE_ShadowCast).
-        bool castsShadow = !hidden && componentProps.GetProp<BoolProperty>("CastShadow")?.Value != false;
-        if (!castsShadow)
+        // Collision that stops only weapons and sight goes on its own layer in game. Its
+        // geometry follows the player's rule (UE3 picks zero-extent traces' by
+        // UseSimpleLineCollision, which matches UseSimpleBoxCollision unless a designer split them).
+        bool weaponsOnly = !BlocksPlayer(actorProps, componentProps);
+        if (weaponsOnly && !BlocksWeapons(actorProps, componentProps))
+            return;
+        // UE3's light traces only meet primitives that cast shadows (TRACE_ShadowCast). The
+        // weapons-only collision lets light through, so characters' shadows stay as they were.
+        bool castsShadow = !weaponsOnly && !hidden && componentProps.GetProp<BoolProperty>("CastShadow")?.Value != false;
+        if (weaponsOnly)
+            trimesh = _weaponsTrimesh;
+        else if (!castsShadow)
             trimesh = _shadowlessTrimesh;
         if (geometry.Hulls != null)
         {
             foreach (Vector3[] hull in geometry.Hulls)
-                AddHull(hull, world, castsShadow);
+                AddHull(hull, world, castsShadow, weaponsOnly);
         }
         else if (geometry.CollisionTriangles != null)
         {
@@ -1256,6 +1280,11 @@ public partial class LevelBuilder
                     trimesh.AddTriangle(transformed[a], transformed[c], transformed[b]);
                 else
                     trimesh.AddTriangle(transformed[a], transformed[b], transformed[c]);
+                if (weaponsOnly)
+                {
+                    _weaponsTriangles++;
+                    continue;
+                }
                 _trimeshTriangles++;
                 if (!castsShadow)
                     _shadowlessTriangles++;
@@ -1588,6 +1617,23 @@ public partial class LevelBuilder
         return componentProps.GetProp<BoolProperty>("CollideActors")?.Value != false
             && componentProps.GetProp<BoolProperty>("BlockActors")?.Value != false
             && componentProps.GetProp<BoolProperty>("BlockNonZeroExtent")?.Value != false;
+    }
+
+    // Unreal 3 stops a zero-extent trace (a weapon's, a line of sight) at a component that
+    // collides and blocks zero-extent checks, on an actor that collides; bBlockActors only
+    // concerns movement, and COLLIDE_BlockWeapons means just this.
+    private static bool BlocksWeapons(PropertyCollection actorProps, PropertyCollection componentProps)
+    {
+        if (actorProps != null)
+        {
+            if (actorProps.GetProp<BoolProperty>("bCollideActors")?.Value == false)
+                return false;
+            string collisionType = actorProps.GetProp<EnumProperty>("CollisionType")?.Value.Instanced;
+            if (collisionType is "COLLIDE_NoCollision" or "COLLIDE_TouchAll" or "COLLIDE_TouchWeapons")
+                return false;
+        }
+        return componentProps.GetProp<BoolProperty>("CollideActors")?.Value != false
+            && componentProps.GetProp<BoolProperty>("BlockZeroExtent")?.Value != false;
     }
 
     private static MeshGeometry ReadGeometry(IMEPackage pcc, ExportEntry meshExport, TextureCache textures)
@@ -1977,7 +2023,8 @@ public partial class LevelBuilder
     // (Godot builds the convex shape from them), and a fan keeps every point in the mesh. One
     // that casts no shadow (blocking volumes, hidden meshes) carries "blocks_light": false, so
     // characters' light traces pass through it.
-    private void AddHull(Vector3[] localPoints, Matrix4x4 world, bool castsShadow)
+    // weaponsOnly: it stops only weapons and sight ("weapons_only": true).
+    private void AddHull(Vector3[] localPoints, Matrix4x4 world, bool castsShadow, bool weaponsOnly = false)
     {
         COLLISION_VERTEX[] points = localPoints.Select(p => new COLLISION_VERTEX(UnrealSpace.Position(Vector3.Transform(p, world)))).ToArray();
         // Outside the playable area when its bounding box is (a slanted hull whose box touches
@@ -2002,11 +2049,15 @@ public partial class LevelBuilder
         for (int i = 1; i + 1 < points.Length; i++)
             primitive.AddTriangle(points[0], points[i], points[i + 1]);
         NodeBuilder node = _collision.CreateNode(hull.Name);
-        if (!castsShadow)
+        if (weaponsOnly)
+            node.Extras = new JsonObject { ["blocks_light"] = false, ["weapons_only"] = true };
+        else if (!castsShadow)
             node.Extras = new JsonObject { ["blocks_light"] = false };
         _scene.AddRigidMesh(hull, node);
         _hullCount++;
-        if (!castsShadow)
+        if (weaponsOnly)
+            _weaponsHulls++;
+        else if (!castsShadow)
             _unlitHulls++;
     }
 
@@ -2202,6 +2253,7 @@ public partial class LevelBuilder
             + $"(glTF built in {built:0.0} s, saved in {clock.Elapsed.TotalSeconds - built:0.0} s).");
         Console.WriteLine($"Textures: {dds}.");
         Console.WriteLine($"Character shadows: {_shadowLights} of {_lightCount} lights cast them, {_steeringLights} steer them; light passes through {_unlitHulls} of {_hullCount} hulls and {_shadowlessTriangles} of {_trimeshTriangles} collision triangles (volumes, hidden or shadowless meshes).");
+        Console.WriteLine($"Weapons-only collision (stops shots and sight, not characters): {_weaponsHulls} hulls, {_weaponsTriangles} triangles.");
         if (CollisionBounds is (Vector3 areaMin, Vector3 areaMax))
             Console.WriteLine($"Collision bounds {areaMin} to {areaMax}: dropped {_droppedHulls} hulls and {_droppedTriangles} collision triangles outside.");
         Console.WriteLine($"Original lighting: {_textureLit} instances from {_pageCount} lightmap pages, {_vertexLit} from vertex lightmaps, "
