@@ -26,6 +26,9 @@ namespace LexExport;
 //
 // Output (stdout, read by the game's AssetExtractor; every line but QUEUED and DONE names its item):
 //   QUEUED <total>                        items known so far (grows when a level adds its looks)
+//   LOOKS <level> <id>,<id>,...           NPC looks just queued from that level's looks manifest
+//                                         (before the QUEUED line counting them; the game's
+//                                         per-level NPC bars)
 //   START <kind> <id> <label>
 //   STEP <kind> <id> <n>/<total> <name>   a level's steps (EntrySteps)
 //   OK <kind> <id>
@@ -171,6 +174,7 @@ public static class ExtractQueue
         (JsonDocument document, string kind, JsonElement list) = ManifestCommand.Read(job.Manifest);
         Documents.Add(document);
         (int weight, int priority, double memoryGb) = Cost(kind);
+        List<string> looks = new List<string>();
         foreach (JsonElement entry in list.EnumerateArray())
         {
             string id = entry.GetProperty("id").GetString();
@@ -191,6 +195,17 @@ public static class ExtractQueue
                 MemoryGb = memoryGb,
             });
             _total++;
+            if (kind == ManifestCommand.Looks)
+                looks.Add(id);
+        }
+        // Which level these looks came from: the looks manifest is "<level>.looks.json".
+        if (looks.Count > 0)
+        {
+            string level = Path.GetFileName(job.Manifest);
+            level = level.EndsWith(ManifestCommand.LooksSuffix, StringComparison.OrdinalIgnoreCase)
+                ? level.Substring(0, level.Length - ManifestCommand.LooksSuffix.Length)
+                : Path.GetFileNameWithoutExtension(level);
+            _log.Direct($"LOOKS {level} {string.Join(",", looks)}\n");
         }
     }
 
