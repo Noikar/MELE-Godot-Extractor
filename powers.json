@@ -30,6 +30,23 @@
       }
     },
     {
+      "id": "overload",
+      "label": "Overload",
+      "note": "ME3's Overload (SFXPowerCustomAction_Overload). Its class default names no impact or projectile role: the burst on the target is CE_HitWallTemplate (also the chain's CE_ImpactTemplate), the wrist flash CE_ReleaseEffectTemplate, and the caster's omni-tool the arm half of CE_CasterCrustTemplate's RvrClientEffectMulti (the hand half is an import). Plus the tech cast clip's cloth foley (HMM_BC_RifleTechTool's SFXAnimNotify_RaceWwiseEvents, in SFXGame.pcc).",
+      "package": "ME3/SFXPower_Overload.pcc",
+      "vfx": {
+        "caster": "BioVFX_T_TechPowers._OmniTool.VCFX.OmniTool_Arm_Left_Cbt_VCFX",
+        "release": "BioVFX_T_TechBall.VCFX.Tech_Attack_Muzzle_VCFX",
+        "impact": "BioVFX_T_TechPowers.05_Overload.VCFX.Overload_Imp_VCFX"
+      },
+      "sounds": {
+        "cast": "Wwise_Power_Tech_Overload.Play_power_tech_P_overload_cast",
+        "impact": "Wwise_Power_Tech_Overload.Play_power_tech_P_overload_impact",
+        "foley_hard": "Wwise_Generic_Foley.Play_foley_movement_hard_very_fast@ME3/SFXGame.pcc",
+        "foley_soft": "Wwise_Generic_Foley.Play_foley_movement_soft_medium@ME3/SFXGame.pcc"
+      }
+    },
+    {
       "id": "omnitool",
       "label": "Omni-tool",
       "note": "Not a power: the omni-tool players use while their menu is open. ME3's left-arm hologram (OmniTool_LeftFull_VCFX_M: the arm and hand loops) and the sounds ME3's HMM_WI_OmniTool clips cue (AnimNotify_WwiseEvents: start and beeps on OmniEnter, end on OmniExit).",

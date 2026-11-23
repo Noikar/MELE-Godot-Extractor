@@ -32,6 +32,8 @@ public static class PropsCommand
             BoolProperty b => b.Value.ToString(),
             EnumProperty en => en.Value.Instanced,
             ByteProperty by => by.Value.ToString(),
+            // The id and, in ME1, its English text (Me1Talk: the package's, its _LOC_INT's, the global).
+            StringRefProperty sr => pcc.Game == MEGame.LE1 && sr.Value > 0 ? $"{sr.Value} \"{Me1Talk.Text(pcc, sr.Value)}\"" : sr.Value.ToString(),
             _ => "",
         };
         Console.WriteLine($"{indent}{p.Name.Instanced} ({p.PropType}) {value}");

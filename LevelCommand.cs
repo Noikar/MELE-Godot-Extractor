@@ -387,6 +387,7 @@ public partial class LevelBuilder
     private readonly NodeBuilder _particles;
     private readonly NodeBuilder _particleAssets;
     private readonly NodeBuilder _placeablesNode;
+    private readonly NodeBuilder _targetsNode;
     private readonly NodeBuilder _decalsNode;
     private readonly NodeBuilder _effectsNode;
     private readonly MaterialBuilder _collisionMaterial = new MaterialBuilder("Collision").WithUnlitShader();
@@ -450,6 +451,8 @@ public partial class LevelBuilder
     private int _excludedComponentCount;
     private int _pageCount, _textureLit, _vertexLit, _placeables, _emitters, _markerCount, _skeletalPlaceables;
     private int _decals, _decalMeshes, _decalsUnlit, _effects;
+    private int _targetSigns, _targetLoot;
+    private readonly List<string> _targetNames = new();
     private readonly Dictionary<string, int> _skipped = new();
 
     // An effects export (PowerVfx): only ParticleAssets (and MaterialTextures, at the end), so
@@ -472,6 +475,7 @@ public partial class LevelBuilder
         _particles = _root.CreateNode("Particles");
         _particleAssets = _root.CreateNode("ParticleAssets");
         _placeablesNode = _root.CreateNode("Placeables");
+        _targetsNode = _root.CreateNode("Targets");
         _decalsNode = _root.CreateNode("Decals");
         _effectsNode = _root.CreateNode("Vfx");
         _mergedNode = _root.CreateNode("Merged");
@@ -700,6 +704,10 @@ public partial class LevelBuilder
             Matrix4x4 world = UnrealTransform.ComponentToActor(placeableComponent.GetProperties()) * actorToWorld;
             AddMeshInstance(pcc, actor, props, placeableComponent, world, packageNode, textures, trimesh);
             _placeables++;
+            if (placeableComponent.GetProperties().GetProp<ObjectProperty>("StaticMesh") is ObjectProperty staticRef
+                && pcc.TryGetUExport(staticRef.Value, out ExportEntry staticMesh)
+                && _geometry.TryGetValue(staticMesh.InstancedFullPath, out MeshGeometry staticGeometry))
+                AddTarget(pcc, actor, props, world, staticGeometry.Bounds);
             AddPlaceableEffects(pcc, actor, props, actorToWorld, textures);
         }
         else if (props.GetProp<ObjectProperty>("PlaceableMesh") is ObjectProperty skeletalProp
@@ -803,6 +811,86 @@ public partial class LevelBuilder
         _markerCount++;
     }
 
+    // A BioWare placeable's name, which ME1 shows at the top of the screen while it's aimed at
+    // (the Citadel's arrow signs: "To Flux"): a BioInert or BioUseable that is targetable and
+    // has a name. Each of the three is its behavior's own when its override flag is set, else
+    // its actor type's: m_bTargetable (m_bTargetableOverride; the behavior's class default is
+    // true, the placeable types' false), ActorGameNameStrRef (ActorGameNameOverride; Me1Talk),
+    // and the tip line under the name, m_nTargetTipTextOverridden / m_nTargetTipText
+    // (m_bTargetTipTextOverride: the Wards' big overhead signs say "Directions"). Those overhead
+    // signs are hidden invisible placeables (biog_apl_invisible_p) scaled over the hologram,
+    // tagged sign_*. Written as Targets/<package>_<actor> at the middle of its mesh's box, with
+    // extras "target": name, tip, type (its actor type's path in BIOG_APL_TYPES,
+    // "Static_Interactive.Sign_Long_StaticInt_Type"), size (the box in glTF axes, m), sign (a
+    // Sign_ type or a sign_ tag), loot (ME1 files the lootable types under Containers: lockers,
+    // safes, aid stations), package. The game names signs by default; a map's layout turns the
+    // rest on one by one (levels.md, "Targets").
+    private void AddTarget(IMEPackage pcc, ExportEntry actor, PropertyCollection props, Matrix4x4 world, BoxSphereBounds bounds)
+    {
+        if (actor.ClassName is not ("BioInert" or "BioUseable") || pcc.Game != MEGame.LE1)
+            return;
+        if (!pcc.TryGetUExport(props.GetProp<ObjectProperty>("m_oBehavior")?.Value ?? 0, out ExportEntry behavior))
+            return;
+        if (!pcc.TryGetUExport(InheritedProp<ObjectProperty>(behavior, "m_oActorType")?.Value ?? 0, out ExportEntry type))
+            return;
+        bool Overridden(string flag) => InheritedProp<BoolProperty>(behavior, flag)?.Value == true;
+        bool targetable = Overridden("m_bTargetableOverride")
+            ? InheritedProp<BoolProperty>(behavior, "m_bTargetable")?.Value ?? true
+            : InheritedProp<BoolProperty>(type, "m_bTargetable")?.Value ?? false;
+        if (!targetable)
+            return;
+        int nameId = Overridden("ActorGameNameOverride")
+            ? InheritedProp<StringRefProperty>(behavior, "ActorGameNameStrRef")?.Value ?? 0
+            : InheritedProp<StringRefProperty>(type, "ActorGameNameStrRef")?.Value ?? 0;
+        string name = Me1Talk.Text(pcc, nameId);
+        if (string.IsNullOrWhiteSpace(name))
+            return;
+        int tipId = Overridden("m_bTargetTipTextOverride")
+            ? InheritedProp<StringRefProperty>(behavior, "m_nTargetTipTextOverridden")?.Value ?? 0
+            : InheritedProp<StringRefProperty>(type, "m_nTargetTipText")?.Value ?? 0;
+        string tip = Me1Talk.Text(pcc, tipId);
+
+        // The mesh's box in world space (its corners through the world matrix), then glTF axes.
+        Vector3 min = new Vector3(float.MaxValue);
+        Vector3 max = new Vector3(float.MinValue);
+        for (int corner = 0; corner < 8; corner++)
+        {
+            Vector3 sign = new Vector3((corner & 1) != 0 ? 1f : -1f, (corner & 2) != 0 ? 1f : -1f, (corner & 4) != 0 ? 1f : -1f);
+            Vector3 point = UnrealSpace.Position(Vector3.Transform(bounds.Origin + bounds.BoxExtent * sign, world));
+            min = Vector3.Min(min, point);
+            max = Vector3.Max(max, point);
+        }
+        Vector3 size = max - min;
+
+        string typePath = type.InstancedFullPath;
+        if (typePath.StartsWith("BIOG_APL_TYPES.", StringComparison.OrdinalIgnoreCase))
+            typePath = typePath["BIOG_APL_TYPES.".Length..];
+        string tag = props.GetProp<NameProperty>("Tag")?.Value.Instanced ?? "";
+        bool isSign = type.ObjectName.Instanced.StartsWith("Sign_", StringComparison.OrdinalIgnoreCase)
+            || tag.StartsWith("sign_", StringComparison.OrdinalIgnoreCase);
+        bool loot = typePath.StartsWith("Containers.", StringComparison.OrdinalIgnoreCase);
+        string packageName = Path.GetFileNameWithoutExtension(pcc.FilePath);
+        JsonObject target = new JsonObject
+        {
+            ["name"] = name,
+            ["tip"] = tip,
+            ["type"] = typePath,
+            ["size"] = new JsonArray(size.X, size.Y, size.Z),
+            ["sign"] = isSign,
+            ["loot"] = loot,
+            // The layout files it in its area's folder by this.
+            ["package"] = Path.GetFileNameWithoutExtension(pcc.FilePath),
+        };
+        NodeBuilder node = new NodeBuilder($"{packageName}_{actor.ObjectName.Instanced}", new JsonObject { ["target"] = target });
+        _targetsNode.AddNode(node);
+        node.LocalMatrix = Matrix4x4.CreateTranslation((min + max) * 0.5f);
+        _targetNames.Add(name);
+        if (isSign)
+            _targetSigns++;
+        if (loot)
+            _targetLoot++;
+    }
+
     // A BioWare placeable drawn by a SkeletalMeshComponent (doors, elevator consoles, bank
     // machines): an empty node at the component's transform, whose extras name its model (a
     // PlaceableAsset_<mesh> scene root) and carry what the game needs to run it (see PlaceableExtras).
@@ -831,6 +919,10 @@ public partial class LevelBuilder
         _placeablesNode.AddNode(node);
         node.LocalMatrix = UnrealTransform.ToGltf(UnrealTransform.ComponentToActor(componentProps) * actorToWorld);
         _skeletalPlaceables++;
+        // Doors never get names; read the mesh's bounds only for the classes that may.
+        if (actor.ClassName is "BioInert" or "BioUseable")
+            AddTarget(pcc, actor, props, UnrealTransform.ComponentToActor(componentProps) * actorToWorld,
+                ObjectBinary.From<SkeletalMesh>(meshExport).Bounds);
     }
 
     // A placeable's visual effects that are made of meshes: its appearance (actor type's
@@ -2271,6 +2363,8 @@ public partial class LevelBuilder
         Console.WriteLine($"Skeletal placeables: {_skeletalPlaceables} from {_skeletalAssets.Count} models, "
             + $"{_sounds.Values.Count(v => v != null)} of {_sounds.Count} sounds to {_soundsDir}.");
         Console.WriteLine($"Placeable effects: {_effects}.");
+        Console.WriteLine($"Targets (named placeables): {_targetNames.Count}, {_targetSigns} signs, {_targetLoot} lootable; "
+            + string.Join(", ", _targetNames.GroupBy(n => n).OrderBy(g => g.Key).Select(g => g.Count() > 1 ? $"{g.Key} x{g.Count()}" : g.Key)) + ".");
         if (_moverCount > 0)
             Console.WriteLine($"Movers (looping matinees from level load): {_moverCount}.");
         Console.WriteLine($"Ambient sounds: {_ambientSounds} ({_ambientMusic} music); music volumes: {_musicVolumeCount}; stream volumes: {_streamVolumeCount}.");

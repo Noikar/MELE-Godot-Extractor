@@ -152,18 +152,22 @@ public partial class LevelBuilder
             {
                 case "RvrCEffectModuleEmitter":
                 {
+                    // The system may be an import from the game's shared packages (Overload's combat
+                    // omni-tool arm plays SFXGame's OmniArm_Loop): read it, its emitters, and their
+                    // assets from the package that holds it.
                     if (p.GetProp<ObjectProperty>("m_pParticleSystem") is not ObjectProperty systemRef
-                        || !pcc.TryGetUExport(systemRef.Value, out ExportEntry system))
+                        || TextureCache.Resolve(pcc, systemRef.Value) is not ExportEntry system)
                         continue;
+                    IMEPackage owner = system.FileRef;
                     Dictionary<string, float> given = ModuleParameters(p);
                     Dictionary<string, float> all = new Dictionary<string, float>(parameters, StringComparer.OrdinalIgnoreCase);
                     foreach ((string name, float value) in given)
                         all[name] = value;
                     List<string> notes = new List<string>();
                     JsonArray emitters = new JsonArray();
-                    foreach (ParticleExport.Emitter emitter in ParticleExport.Read(pcc, system, notes, shared: true, all))
+                    foreach (ParticleExport.Emitter emitter in ParticleExport.Read(owner, system, notes, shared: true, all))
                     {
-                        string asset = ParticleAsset(pcc, emitter, textures);
+                        string asset = ParticleAsset(owner, emitter, textures);
                         if (asset == null)
                         {
                             notes.Add($"{emitter.Json["name"]}: nothing to draw");
